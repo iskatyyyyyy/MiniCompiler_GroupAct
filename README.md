@@ -24,3 +24,7 @@ Task Delegation:
 
     Toni Ahn Narra
     - UI/UX
+
+Professor: Mr. Ariel Tomagan 
+Course subject: Programming Languages
+Submission Date: April 24, 2025

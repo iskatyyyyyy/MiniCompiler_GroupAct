@@ -164,6 +164,9 @@ class Parser:
                 return self.parse_continue_statement()
             if token.value == 'struct':
                 return self.parse_declaration()
+            if token.value == 'do':
+                return self.parse_do_while_statement()
+
 
         if token.type == 'SYMBOL' and token.value == '{':
             return self.parse_compound_statement()
@@ -210,6 +213,17 @@ class Parser:
         self.match('SYMBOL', ')')
         body = self.parse_statement()
         return ASTNode("ForStatement", children=[init, cond, post, body], line=token.line)
+    
+    def parse_do_while_statement(self):
+        token = self.match('KEYWORD', 'do')
+        body = self.parse_statement()
+        self.match('KEYWORD', 'while')
+        self.match('SYMBOL', '(')
+        condition = self.parse_expression()
+        self.match('SYMBOL', ')')
+        self.match('SYMBOL', ';')
+        return ASTNode("DoWhileStatement", children=[body, condition], line=token.line)
+
 
     def parse_break_statement(self):
         token = self.match('KEYWORD', 'break')
@@ -227,10 +241,46 @@ class Parser:
 
     def parse_assignment(self):
         node = self.parse_logical_or()
+
+        # Simple assignment
         if self.accept('OPERATOR', '='):
             rhs = self.parse_assignment()
             return ASTNode("Assign", children=[node, rhs])
+
+        # Compound assignments
+        elif self.accept('OPERATOR', '+='):
+            rhs = self.parse_assignment()
+            return ASTNode("AddAssign", children=[node, rhs])
+        elif self.accept('OPERATOR', '-='):
+            rhs = self.parse_assignment()
+            return ASTNode("SubtractAssign", children=[node, rhs])
+        elif self.accept('OPERATOR', '*='):
+            rhs = self.parse_assignment()
+            return ASTNode("MultiplyAssign", children=[node, rhs])
+        elif self.accept('OPERATOR', '/='):
+            rhs = self.parse_assignment()
+            return ASTNode("DivideAssign", children=[node, rhs])
+        elif self.accept('OPERATOR', '%='):
+            rhs = self.parse_assignment()
+            return ASTNode("ModuloAssign", children=[node, rhs])
+
         return node
+
+
+    def parse_unary(self):
+        if self.accept('OPERATOR', '++'):
+            expr = self.parse_unary()
+            return ASTNode("PreIncrement", children=[expr])
+        if self.accept('OPERATOR', '--'):
+            expr = self.parse_unary()
+            return ASTNode("PreDecrement", children=[expr])
+        if self.accept('OPERATOR', '-'):
+            expr = self.parse_unary()
+            return ASTNode("Negate", children=[expr])
+        if self.accept('OPERATOR', '!'):
+            expr = self.parse_unary()
+            return ASTNode("LogicalNot", children=[expr])
+        return self.parse_factor()
 
     def parse_logical_or(self):
         node = self.parse_logical_and()
@@ -292,32 +342,55 @@ class Parser:
         return node
 
     def parse_term(self):
-        node = self.parse_factor()
+        node = self.parse_unary()
         while True:
             if self.accept('OPERATOR', '*'):
-                rhs = self.parse_factor()
+                rhs = self.parse_unary()
                 node = ASTNode("Multiply", children=[node, rhs])
             elif self.accept('OPERATOR', '/'):
-                rhs = self.parse_factor()
+                rhs = self.parse_unary()
                 node = ASTNode("Divide", children=[node, rhs])
             elif self.accept('OPERATOR', '%'):
-                rhs = self.parse_factor()
+                rhs = self.parse_unary()
                 node = ASTNode("Modulo", children=[node, rhs])
             else:
                 break
         return node
 
+
     def parse_factor(self):
         token = self.current_token()
 
+        # Literal number
         if token.type == 'NUMBER':
             self.current += 1
             return ASTNode("Number", value=token.value, line=token.line)
 
+        # Identifier (maybe a function call)
         if token.type == 'IDENTIFIER':
             self.current += 1
-            return ASTNode("Identifier", value=token.value, line=token.line)
+            id_node = ASTNode("Identifier", value=token.value, line=token.line)
 
+            # Check for postfix ++ or --
+            if self.accept('OPERATOR', '++'):
+                return ASTNode("PostIncrement", children=[id_node])
+            if self.accept('OPERATOR', '--'):
+                return ASTNode("PostDecrement", children=[id_node])
+            
+            # Check if this is a function call
+            if self.accept('SYMBOL', '('):
+                args = []
+                if self.current_token().type != 'SYMBOL' or self.current_token().value != ')':
+                    while True:
+                        args.append(self.parse_expression())
+                        if not self.accept('SYMBOL', ','):
+                            break
+                self.match('SYMBOL', ')')
+                return ASTNode("FunctionCall", value=id_node.value, children=args, line=token.line)
+
+            return id_node
+
+        # Parenthesized expression
         if token.type == 'SYMBOL' and token.value == '(':
             self.current += 1
             expr = self.parse_expression()

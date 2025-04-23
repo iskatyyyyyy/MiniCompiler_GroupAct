@@ -16,3 +16,12 @@ class ASTNode:
         for child in self.children:
             result += "\n" + child.__repr__(level + 1)
         return result
+
+    def to_dict(self):
+        return {
+            "kind": self.kind,
+            "value": self.value,
+            "line": self.line,
+            "col": self.col,
+            "children": [child.to_dict() for child in self.children] if self.children else []
+        }

@@ -8,6 +8,7 @@ class Tokens:
     def __repr__(self):
         return f'{self.value:<15} {self.type:<15} {self.line}'
 
+
 class Lexical:
     def __init__(self, text):
         self.text = text
@@ -15,6 +16,7 @@ class Lexical:
         self.line = 1
         self.current_char = None
         self.advanceNextChar()
+
     def advanceNextChar(self):
         self.pos += 1
         if self.pos < len(self.text):
@@ -24,9 +26,26 @@ class Lexical:
         else:
             self.current_char = None
 
+    def peek(self):
+        return self.text[self.pos + 1] if self.pos + 1 < len(self.text) else ''
+
     def skip_whitespace(self):
         while self.current_char is not None and self.current_char.isspace():
             self.advanceNextChar()
+
+    def skip_comment(self):
+        if self.current_char == '/' and self.peek() == '/':
+            while self.current_char is not None and self.current_char != '\n':
+                self.advanceNextChar()
+        elif self.current_char == '/' and self.peek() == '*':
+            self.advanceNextChar()
+            self.advanceNextChar()
+            while self.current_char is not None:
+                if self.current_char == '*' and self.peek() == '/':
+                    self.advanceNextChar()
+                    self.advanceNextChar()
+                    break
+                self.advanceNextChar()
 
     def collect_identifier_or_keyword(self):
         result = ''
@@ -47,10 +66,55 @@ class Lexical:
     def collect_number(self):
         result = ''
         line_num = self.line
-        while self.current_char is not None and self.current_char.isdigit():
+        dot_count = 0
+
+        while self.current_char is not None and (self.current_char.isdigit() or self.current_char == '.'):
+            if self.current_char == '.':
+                if dot_count == 1:
+                    break
+                dot_count += 1
             result += self.current_char
             self.advanceNextChar()
+
         return Tokens('NUMBER', result, line_num)
+
+    def collect_string(self):
+        result = ''
+        line_num = self.line
+        self.advanceNextChar()  # Skip opening quote
+
+        while self.current_char is not None and self.current_char != '"':
+            if self.current_char == '\\' and self.peek() == '"':
+                result += '"'
+                self.advanceNextChar()
+            else:
+                result += self.current_char
+            self.advanceNextChar()
+
+        self.advanceNextChar()  # Skip closing quote
+        return Tokens('STRING', result, line_num)
+
+    def collect_char(self):
+        result = ''
+        line_num = self.line
+        self.advanceNextChar()  # Skip opening '
+
+        if self.current_char == '\\':  # handle escape like '\n'
+            result += self.current_char
+            self.advanceNextChar()
+            if self.current_char is not None:
+                result += self.current_char
+                self.advanceNextChar()
+        elif self.current_char is not None:
+            result += self.current_char
+            self.advanceNextChar()
+
+        if self.current_char == "'":
+            self.advanceNextChar()  # Skip closing '
+        else:
+            return Tokens('ERROR', result, line_num)
+
+        return Tokens('CHAR_LITERAL', result, line_num)
 
     def get_tokens(self):
         tokens = []
@@ -76,6 +140,10 @@ class Lexical:
                 self.skip_whitespace()
                 continue
 
+            if self.current_char == '/' and (self.peek() == '/' or self.peek() == '*'):
+                self.skip_comment()
+                continue
+
             if self.current_char.isalpha() or self.current_char == '_':
                 tokens.append(self.collect_identifier_or_keyword())
                 continue
@@ -84,12 +152,17 @@ class Lexical:
                 tokens.append(self.collect_number())
                 continue
 
-            two_chars = self.current_char
-            next_char = self.text[self.pos + 1] if self.pos + 1 < len(self.text) else ''
-            combined = two_chars + next_char
+            if self.current_char == '"':
+                tokens.append(self.collect_string())
+                continue
 
-            if combined in self.operators:
-                tokens.append(Tokens('OPERATOR', combined, self.line))
+            if self.current_char == "'":
+                tokens.append(self.collect_char())
+                continue
+
+            two_char = self.current_char + self.peek()
+            if two_char in self.operators:
+                tokens.append(Tokens('OPERATOR', two_char, self.line))
                 self.advanceNextChar()
                 self.advanceNextChar()
                 continue
@@ -108,6 +181,7 @@ class Lexical:
             self.advanceNextChar()
 
         return tokens
+
 
 # Example usage
 if __name__ == "__main__":

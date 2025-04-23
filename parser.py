@@ -1,5 +1,3 @@
-# parser.py
-
 from ast_1 import ASTNode
 
 class SyntaxError(Exception):
@@ -55,45 +53,62 @@ class Parser:
         return False
 
     def parse_declaration(self):
-        type_token = self.match('KEYWORD')  # int, float, char, etc.
+        # Struct definition or struct variable
+        if self.accept('KEYWORD', 'struct'):
+            if self.accept('SYMBOL', '{'):
+                raise SyntaxError("Anonymous structs not supported yet", self.current_token().line, 0)
+            struct_name = self.match('IDENTIFIER')
+            if self.accept('SYMBOL', '{'):
+                return self.parse_struct_declaration(struct_name)
+            else:
+                type_token = struct_name
+                type_token.value = 'struct ' + struct_name.value
+        else:
+            type_token = self.match('KEYWORD')
+
         declarators = []
-
         while True:
-            # Parse pointer level (e.g., *, **, etc.)
-            pointer_level = 0
-            while self.accept('OPERATOR', '*'):
-                pointer_level += 1
-
-            id_token = self.match('IDENTIFIER')
-
-            # Optional array size: [NUMBER]
-            array_size = None
-            if self.accept('SYMBOL', '['):
-                size_token = self.match('NUMBER')
-                self.match('SYMBOL', ']')
-                array_size = size_token.value
-
-            # Build AST for this declarator
-            children = [
-                ASTNode("Type", value=type_token.value, line=type_token.line),
-            ]
-
-            if pointer_level > 0:
-                children.append(ASTNode("Pointer", value=pointer_level, line=id_token.line))
-
-            children.append(ASTNode("Identifier", value=id_token.value, line=id_token.line))
-
-            if array_size is not None:
-                children.append(ASTNode("ArraySize", value=array_size, line=id_token.line))
-
-            declarators.append(ASTNode("Declarator", children=children, line=id_token.line))
-
+            declarator = self.parse_declarator(type_token)
+            declarators.append(declarator)
             if not self.accept('SYMBOL', ','):
                 break
 
         self.match('SYMBOL', ';')
         return ASTNode("VariableDeclarationList", children=declarators, line=type_token.line)
 
+    def parse_struct_declaration(self, name_token):
+        fields = []
+        while not self.accept('SYMBOL', '}'):
+            fields.append(self.parse_declaration())
+        self.match('SYMBOL', ';')
+        return ASTNode("StructDeclaration", value=name_token.value, children=fields, line=name_token.line)
+
+    def parse_declarator(self, base_type_token):
+        pointer_level = 0
+        while self.accept('OPERATOR', '*'):
+            pointer_level += 1
+
+        id_token = self.match('IDENTIFIER')
+
+        array_size = None
+        if self.accept('SYMBOL', '['):
+            size_token = self.match('NUMBER')
+            self.match('SYMBOL', ']')
+            array_size = size_token.value
+
+        children = [ASTNode("Type", value=base_type_token.value, line=base_type_token.line)]
+        if pointer_level > 0:
+            children.append(ASTNode("Pointer", value=pointer_level, line=id_token.line))
+        children.append(ASTNode("Identifier", value=id_token.value, line=id_token.line))
+        if array_size is not None:
+            children.append(ASTNode("ArraySize", value=array_size, line=id_token.line))
+
+        # After parsing the identifier (or array)
+        if self.accept('OPERATOR', '='):
+            init_expr = self.parse_expression()
+            children.append(ASTNode("Initializer", children=[init_expr]))
+
+        return ASTNode("Declarator", children=children, line=id_token.line)
 
     def parse_function_definition(self):
         type_token = self.match('KEYWORD')
@@ -102,7 +117,6 @@ class Parser:
         params = self.parse_parameter_list()
         self.match('SYMBOL', ')')
         body = self.parse_compound_statement()
-
         return ASTNode("FunctionDefinition", value=id_token.value, line=type_token.line, children=[
             ASTNode("ReturnType", value=type_token.value),
             ASTNode("Parameters", children=params),
@@ -111,7 +125,7 @@ class Parser:
 
     def parse_parameter_list(self):
         params = []
-        if self.accept('KEYWORD'):  # single param or start of list
+        if self.accept('KEYWORD'):
             self.current -= 1
             while True:
                 type_token = self.match('KEYWORD')
@@ -133,28 +147,28 @@ class Parser:
 
     def parse_statement(self):
         token = self.current_token()
-
         if token.type == 'KEYWORD':
             if token.value in {'int', 'float', 'char', 'void'}:
                 return self.parse_declaration()
-            elif token.value == 'return':
+            if token.value == 'return':
                 return self.parse_return_statement()
-            elif token.value == 'if':
+            if token.value == 'if':
                 return self.parse_if_statement()
-            elif token.value == 'while':
+            if token.value == 'while':
                 return self.parse_while_statement()
-            elif token.value == 'for':
+            if token.value == 'for':
                 return self.parse_for_statement()
-            elif token.value == 'break':
+            if token.value == 'break':
                 return self.parse_break_statement()
-            elif token.value == 'continue':
+            if token.value == 'continue':
                 return self.parse_continue_statement()
+            if token.value == 'struct':
+                return self.parse_declaration()
 
         if token.type == 'SYMBOL' and token.value == '{':
             return self.parse_compound_statement()
 
         return self.parse_expression_statement()
-
 
     def parse_expression_statement(self):
         expr = self.parse_expression()
@@ -173,9 +187,7 @@ class Parser:
         cond = self.parse_expression()
         self.match('SYMBOL', ')')
         then_stmt = self.parse_statement()
-        else_stmt = None
-        if self.accept('KEYWORD', 'else'):
-            else_stmt = self.parse_statement()
+        else_stmt = self.parse_statement() if self.accept('KEYWORD', 'else') else None
         children = [cond, then_stmt]
         if else_stmt:
             children.append(else_stmt)
@@ -209,7 +221,7 @@ class Parser:
         self.match('SYMBOL', ';')
         return ASTNode("ContinueStatement", line=token.line)
 
-    # --- Expression Parsing with Precedence ---
+    # --- Expression Parsing ---
     def parse_expression(self):
         return self.parse_assignment()
 

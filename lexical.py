@@ -6,7 +6,8 @@ class Tokens:
         self.line = line
 
     def __repr__(self):
-        return f'{self.value:<15} {self.type:<15} {self.line}'
+        # Dynamically adjust spacing to maintain alignment
+        return f'{self.value:<30} {self.type:<20} {self.line}'
 
 
 class Lexical:
@@ -58,8 +59,13 @@ class Lexical:
             token_type = 'KEYWORD'
         elif result in self.control_flow:
             token_type = 'CONTROL_FLOW'
+        elif result in self.standard_identifiers:
+            token_type = 'STANDARD_IDENTIFIER'
         else:
-            token_type = 'IDENTIFIER'
+            if self.current_char == '(':
+                token_type = 'FUNCTION_CALL' if result not in self.keywords else 'KEYWORD'
+            else:
+                token_type = 'ERROR'
 
         return Tokens(token_type, result, line_num)
 
@@ -118,6 +124,7 @@ class Lexical:
 
     def get_tokens(self):
         tokens = []
+        errors = []
 
         self.keywords = {
             'auto', 'break', 'case', 'char', 'const', 'continue', 'default', 'do',
@@ -127,6 +134,13 @@ class Lexical:
         }
 
         self.control_flow = {'if', 'else', 'switch', 'case', 'for', 'while', 'do'}
+
+        self.standard_identifiers = {
+            'main', 'printf', 'scanf', 'puts', 'gets', 'malloc', 'calloc', 'free', 'exit',
+            'strlen', 'strcpy', 'strncpy', 'strcmp', 'strcat', 'fopen', 'fclose', 'fread',
+            'fwrite', 'fseek', 'ftell', 'rewind', 'feof', 'fgetc', 'fputc', 'fgets', 'fputs',
+            'getchar', 'putchar', 'perror', 'atoi', 'atof', 'atol', 'toupper', 'tolower'
+        }
 
         self.operators = {
             '++', '--', '+=', '-=', '*=', '/=', '%=', '==', '!=', '<=', '>=', '&&', '||',
@@ -145,7 +159,10 @@ class Lexical:
                 continue
 
             if self.current_char.isalpha() or self.current_char == '_':
-                tokens.append(self.collect_identifier_or_keyword())
+                token = self.collect_identifier_or_keyword()
+                if token.type == 'ERROR':
+                    errors.append(f"Error: '{token.value}' is not a valid function or identifier.")
+                tokens.append(token)
                 continue
 
             if self.current_char.isdigit():
@@ -177,10 +194,11 @@ class Lexical:
                 self.advanceNextChar()
                 continue
 
-            tokens.append(Tokens('UNKNOWN', self.current_char, self.line))
+            tokens.append(Tokens('ERROR', self.current_char, self.line))
+            errors.append(f"Error: Invalid token '{self.current_char}' found at line {self.line}.")
             self.advanceNextChar()
 
-        return tokens
+        return tokens, errors
 
 
 # Example usage
@@ -194,9 +212,15 @@ if __name__ == "__main__":
         user_input += line + '\n'
 
     lexer = Lexical(user_input)
-    tokens = lexer.get_tokens()
+    tokens, errors = lexer.get_tokens()
 
-    print(f"\n{'TOKEN VALUE':<15} {'TOKEN TYPE':<15} LINE")
-    print('-' * 45)
+    print(f"\n{'TOKEN VALUE':<30} {'TOKEN TYPE':<20} LINE")
+    print('-' * 70)
     for token in tokens:
         print(token)
+
+    # Display error messages
+    if errors:
+        print("\nError Messages:")
+        for error in errors:
+            print(error)

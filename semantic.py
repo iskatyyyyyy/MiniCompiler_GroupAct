@@ -7,6 +7,11 @@ class Semantic:  # Define a class named 'Semantic' which will hold all functiona
 
         for i, line in enumerate(lines):  # Loop over each line with its index.
             line = line.strip()  # Remove leading and trailing whitespace.
+            # Rule: Detect division by zero
+            division_by_zero_pattern = r"/\s*0(\D|$)"
+            if re.search(division_by_zero_pattern, line):
+                print(f"Line {i + 1}: Error - Division by zero detected.")
+                errors = True
 
             # Rule 1: Check if the line ends with a semicolon (except struct definitions).
             if not line.endswith(";") and "struct" not in line:

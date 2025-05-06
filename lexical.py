@@ -61,11 +61,11 @@ class Lexical:
             token_type = 'CONTROL_FLOW'
         elif result in self.standard_identifiers:
             token_type = 'STANDARD_IDENTIFIER'
+        elif self.current_char == '(':
+            token_type = 'FUNCTION_CALL'
         else:
-            if self.current_char == '(':
-                token_type = 'FUNCTION_CALL' if result not in self.keywords else 'KEYWORD'
-            else:
-                token_type = 'ERROR'
+            token_type = 'IDENTIFIER'
+
 
         return Tokens(token_type, result, line_num)
 

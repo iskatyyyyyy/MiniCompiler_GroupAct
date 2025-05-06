@@ -1,400 +1,816 @@
-from ast_1 import ASTNode
+# Import the Tokens and Lexical classes from the provided lexer
+from lexical import Tokens, Lexical
 
-class SyntaxError(Exception):
-    def __init__(self, message, line, col):
-        super().__init__(f"[Line {line}, Col {col}] SyntaxError: {message}")
-
+# Import AST nodes from the separate module
+from ast_1 import (
+    ASTNode, Program, VarDeclaration, FunctionDeclaration, Parameter,
+    BlockStatement, ExpressionStatement, IfStatement, WhileStatement,
+    DoWhileStatement, ForStatement, SwitchStatement, CaseStatement,
+    BreakStatement, ContinueStatement, ReturnStatement, BinaryExpression,
+    UnaryExpression, AssignmentExpression, Identifier, Literal, FunctionCall,
+    ArrayAccess, ArrayDeclaration, StructDeclaration, StructField, StructAccess,
+    ConditionalExpression, SizeofExpression, TypeCastExpression
+)
 
 class Parser:
     def __init__(self, tokens):
-        self.tokens = tokens
+        self.tokens = []
         self.current = 0
-
-    def current_token(self):
-        return self.tokens[self.current] if self.current < len(self.tokens) else None
-
-    def match(self, type_, value=None):
-        token = self.current_token()
-        if token and token.type == type_ and (value is None or token.value == value):
-            self.current += 1
-            return token
-        expected = f"{type_}('{value}')" if value else type_
-        actual = f"{token.type}('{token.value}')" if token else "EOF"
-        line = token.line if token else 0
-        raise SyntaxError(f"Expected {expected}, got {actual}", line, 0)
-
-    def accept(self, type_, value=None):
-        token = self.current_token()
-        if token and token.type == type_ and (value is None or token.value == value):
-            self.current += 1
-            return token
-        return None
-
-    def parse(self):
-        return self.parse_translation_unit()
-
-    def parse_translation_unit(self):
-        children = []
-        while self.current_token():
-            children.append(self.parse_external_declaration())
-        return ASTNode("TranslationUnit", children=children)
-
-    def parse_external_declaration(self):
-        if self.peek_function_definition():
-            return self.parse_function_definition()
-        return self.parse_declaration()
-
-    def peek_function_definition(self):
-        pos = self.current
-        if self.accept('KEYWORD') and self.accept('IDENTIFIER') and self.accept('SYMBOL', '('):
-            self.current = pos
-            return True
-        self.current = pos
-        return False
-
-    def parse_declaration(self):
-        # Struct definition or struct variable
-        if self.accept('KEYWORD', 'struct'):
-            if self.accept('SYMBOL', '{'):
-                raise SyntaxError("Anonymous structs not supported yet", self.current_token().line, 0)
-            struct_name = self.match('IDENTIFIER')
-            if self.accept('SYMBOL', '{'):
-                return self.parse_struct_declaration(struct_name)
-            else:
-                type_token = struct_name
-                type_token.value = 'struct ' + struct_name.value
-        else:
-            type_token = self.match('KEYWORD')
-
-        declarators = []
-        while True:
-            declarator = self.parse_declarator(type_token)
-            declarators.append(declarator)
-            if not self.accept('SYMBOL', ','):
-                break
-
-        self.match('SYMBOL', ';')
-        return ASTNode("VariableDeclarationList", children=declarators, line=type_token.line)
-
-    def parse_struct_declaration(self, name_token):
-        fields = []
-        while not self.accept('SYMBOL', '}'):
-            fields.append(self.parse_declaration())
-        self.match('SYMBOL', ';')
-        return ASTNode("StructDeclaration", value=name_token.value, children=fields, line=name_token.line)
-
-    def parse_declarator(self, base_type_token):
-        pointer_level = 0
-        while self.accept('OPERATOR', '*'):
-            pointer_level += 1
-
-        id_token = self.match('IDENTIFIER')
-
-        array_size = None
-        if self.accept('SYMBOL', '['):
-            size_token = self.match('NUMBER')
-            self.match('SYMBOL', ']')
-            array_size = size_token.value
-
-        children = [ASTNode("Type", value=base_type_token.value, line=base_type_token.line)]
-        if pointer_level > 0:
-            children.append(ASTNode("Pointer", value=pointer_level, line=id_token.line))
-        children.append(ASTNode("Identifier", value=id_token.value, line=id_token.line))
-        if array_size is not None:
-            children.append(ASTNode("ArraySize", value=array_size, line=id_token.line))
-
-        # After parsing the identifier (or array)
-        if self.accept('OPERATOR', '='):
-            init_expr = self.parse_expression()
-            children.append(ASTNode("Initializer", children=[init_expr]))
-
-        return ASTNode("Declarator", children=children, line=id_token.line)
-
-    def parse_function_definition(self):
-        type_token = self.match('KEYWORD')
-        id_token = self.match('IDENTIFIER')
-        self.match('SYMBOL', '(')
-        params = self.parse_parameter_list()
-        self.match('SYMBOL', ')')
-        body = self.parse_compound_statement()
-        return ASTNode("FunctionDefinition", value=id_token.value, line=type_token.line, children=[
-            ASTNode("ReturnType", value=type_token.value),
-            ASTNode("Parameters", children=params),
-            body
-        ])
-
-    def parse_parameter_list(self):
-        params = []
-        if self.accept('KEYWORD'):
-            self.current -= 1
-            while True:
-                type_token = self.match('KEYWORD')
-                id_token = self.match('IDENTIFIER')
-                params.append(ASTNode("Parameter", children=[
-                    ASTNode("Type", value=type_token.value),
-                    ASTNode("Identifier", value=id_token.value)
-                ]))
-                if not self.accept('SYMBOL', ','):
-                    break
-        return params
-
-    def parse_compound_statement(self):
-        self.match('SYMBOL', '{')
-        stmts = []
-        while not self.accept('SYMBOL', '}'):
-            stmts.append(self.parse_statement())
-        return ASTNode("CompoundStatement", children=stmts)
-
-    def parse_statement(self):
-        token = self.current_token()
-        if token.type == 'KEYWORD':
-            if token.value in {'int', 'float', 'char', 'void'}:
-                return self.parse_declaration()
-            if token.value == 'return':
-                return self.parse_return_statement()
-            if token.value == 'if':
-                return self.parse_if_statement()
-            if token.value == 'while':
-                return self.parse_while_statement()
-            if token.value == 'for':
-                return self.parse_for_statement()
-            if token.value == 'break':
-                return self.parse_break_statement()
-            if token.value == 'continue':
-                return self.parse_continue_statement()
-            if token.value == 'struct':
-                return self.parse_declaration()
-            if token.value == 'do':
-                return self.parse_do_while_statement()
-
-
-        if token.type == 'SYMBOL' and token.value == '{':
-            return self.parse_compound_statement()
-
-        return self.parse_expression_statement()
-
-    def parse_expression_statement(self):
-        expr = self.parse_expression()
-        self.match('SYMBOL', ';')
-        return ASTNode("ExpressionStatement", children=[expr])
-
-    def parse_return_statement(self):
-        token = self.match('KEYWORD', 'return')
-        expr = self.parse_expression()
-        self.match('SYMBOL', ';')
-        return ASTNode("ReturnStatement", children=[expr], line=token.line)
-
-    def parse_if_statement(self):
-        token = self.match('KEYWORD', 'if')
-        self.match('SYMBOL', '(')
-        cond = self.parse_expression()
-        self.match('SYMBOL', ')')
-        then_stmt = self.parse_statement()
-        else_stmt = self.parse_statement() if self.accept('KEYWORD', 'else') else None
-        children = [cond, then_stmt]
-        if else_stmt:
-            children.append(else_stmt)
-        return ASTNode("IfStatement", children=children, line=token.line)
-
-    def parse_while_statement(self):
-        token = self.match('KEYWORD', 'while')
-        self.match('SYMBOL', '(')
-        cond = self.parse_expression()
-        self.match('SYMBOL', ')')
-        body = self.parse_statement()
-        return ASTNode("WhileStatement", children=[cond, body], line=token.line)
-
-    def parse_for_statement(self):
-        token = self.match('KEYWORD', 'for')
-        self.match('SYMBOL', '(')
-        init = self.parse_expression_statement()
-        cond = self.parse_expression_statement()
-        post = self.parse_expression()
-        self.match('SYMBOL', ')')
-        body = self.parse_statement()
-        return ASTNode("ForStatement", children=[init, cond, post, body], line=token.line)
+        self.errors = []
     
-    def parse_do_while_statement(self):
-        token = self.match('KEYWORD', 'do')
-        body = self.parse_statement()
-        self.match('KEYWORD', 'while')
-        self.match('SYMBOL', '(')
-        condition = self.parse_expression()
-        self.match('SYMBOL', ')')
-        self.match('SYMBOL', ';')
-        return ASTNode("DoWhileStatement", children=[body, condition], line=token.line)
+    def __len__(self):
+        return len(self.tokens)
 
-
-    def parse_break_statement(self):
-        token = self.match('KEYWORD', 'break')
-        self.match('SYMBOL', ';')
-        return ASTNode("BreakStatement", line=token.line)
-
-    def parse_continue_statement(self):
-        token = self.match('KEYWORD', 'continue')
-        self.match('SYMBOL', ';')
-        return ASTNode("ContinueStatement", line=token.line)
-
-    # --- Expression Parsing ---
-    def parse_expression(self):
-        return self.parse_assignment()
-
-    def parse_assignment(self):
-        node = self.parse_logical_or()
-
-        # Simple assignment
-        if self.accept('OPERATOR', '='):
-            rhs = self.parse_assignment()
-            return ASTNode("Assign", children=[node, rhs])
-
-        # Compound assignments
-        elif self.accept('OPERATOR', '+='):
-            rhs = self.parse_assignment()
-            return ASTNode("AddAssign", children=[node, rhs])
-        elif self.accept('OPERATOR', '-='):
-            rhs = self.parse_assignment()
-            return ASTNode("SubtractAssign", children=[node, rhs])
-        elif self.accept('OPERATOR', '*='):
-            rhs = self.parse_assignment()
-            return ASTNode("MultiplyAssign", children=[node, rhs])
-        elif self.accept('OPERATOR', '/='):
-            rhs = self.parse_assignment()
-            return ASTNode("DivideAssign", children=[node, rhs])
-        elif self.accept('OPERATOR', '%='):
-            rhs = self.parse_assignment()
-            return ASTNode("ModuloAssign", children=[node, rhs])
-
-        return node
-
-
-    def parse_unary(self):
-        if self.accept('OPERATOR', '++'):
-            expr = self.parse_unary()
-            return ASTNode("PreIncrement", children=[expr])
-        if self.accept('OPERATOR', '--'):
-            expr = self.parse_unary()
-            return ASTNode("PreDecrement", children=[expr])
-        if self.accept('OPERATOR', '-'):
-            expr = self.parse_unary()
-            return ASTNode("Negate", children=[expr])
-        if self.accept('OPERATOR', '!'):
-            expr = self.parse_unary()
-            return ASTNode("LogicalNot", children=[expr])
-        return self.parse_factor()
-
-    def parse_logical_or(self):
-        node = self.parse_logical_and()
-        while self.accept('OPERATOR', '||'):
-            rhs = self.parse_logical_and()
-            node = ASTNode("LogicalOr", children=[node, rhs])
-        return node
-
-    def parse_logical_and(self):
-        node = self.parse_equality()
-        while self.accept('OPERATOR', '&&'):
-            rhs = self.parse_equality()
-            node = ASTNode("LogicalAnd", children=[node, rhs])
-        return node
-
-    def parse_equality(self):
-        node = self.parse_relational()
-        while True:
-            if self.accept('OPERATOR', '=='):
-                rhs = self.parse_relational()
-                node = ASTNode("Equal", children=[node, rhs])
-            elif self.accept('OPERATOR', '!='):
-                rhs = self.parse_relational()
-                node = ASTNode("NotEqual", children=[node, rhs])
-            else:
-                break
-        return node
-
-    def parse_relational(self):
-        node = self.parse_additive()
-        while True:
-            if self.accept('OPERATOR', '<'):
-                rhs = self.parse_additive()
-                node = ASTNode("Less", children=[node, rhs])
-            elif self.accept('OPERATOR', '>'):
-                rhs = self.parse_additive()
-                node = ASTNode("Greater", children=[node, rhs])
-            elif self.accept('OPERATOR', '<='):
-                rhs = self.parse_additive()
-                node = ASTNode("LessEqual", children=[node, rhs])
-            elif self.accept('OPERATOR', '>='):
-                rhs = self.parse_additive()
-                node = ASTNode("GreaterEqual", children=[node, rhs])
-            else:
-                break
-        return node
-
-    def parse_additive(self):
-        node = self.parse_term()
-        while True:
-            if self.accept('OPERATOR', '+'):
-                rhs = self.parse_term()
-                node = ASTNode("Add", children=[node, rhs])
-            elif self.accept('OPERATOR', '-'):
-                rhs = self.parse_term()
-                node = ASTNode("Subtract", children=[node, rhs])
-            else:
-                break
-        return node
-
-    def parse_term(self):
-        node = self.parse_unary()
-        while True:
-            if self.accept('OPERATOR', '*'):
-                rhs = self.parse_unary()
-                node = ASTNode("Multiply", children=[node, rhs])
-            elif self.accept('OPERATOR', '/'):
-                rhs = self.parse_unary()
-                node = ASTNode("Divide", children=[node, rhs])
-            elif self.accept('OPERATOR', '%'):
-                rhs = self.parse_unary()
-                node = ASTNode("Modulo", children=[node, rhs])
-            else:
-                break
-        return node
-
-
-    def parse_factor(self):
-        token = self.current_token()
-
-        # Literal number
-        if token.type == 'NUMBER':
-            self.current += 1
-            return ASTNode("Number", value=token.value, line=token.line)
-
-        # Identifier (maybe a function call)
-        if token.type == 'IDENTIFIER':
-            self.current += 1
-            id_node = ASTNode("Identifier", value=token.value, line=token.line)
-
-            # Check for postfix ++ or --
-            if self.accept('OPERATOR', '++'):
-                return ASTNode("PostIncrement", children=[id_node])
-            if self.accept('OPERATOR', '--'):
-                return ASTNode("PostDecrement", children=[id_node])
+    def __getitem__(self, index):
+        return self.tokens[index]
+    
+    def parse(self):
+        declarations = []
+        while not self.is_at_end():
+            try:
+                declarations.append(self.declaration())
+            except Exception as e:
+                self.errors.append(f"Parse error at line {self.peek().line}: {str(e)}")
+                self.synchronize()
+        
+        return Program(declarations), self.errors
+    
+    def declaration(self):
+        # Check for struct declaration
+        if self.match('KEYWORD') and self.previous().value == 'struct':
+            return self.struct_declaration()
+        
+        # Check if it's a function or variable declaration
+        if self.match('KEYWORD'):
+            type_token = self.previous()
             
-            # Check if this is a function call
-            if self.accept('SYMBOL', '('):
-                args = []
-                if self.current_token().type != 'SYMBOL' or self.current_token().value != ')':
-                    while True:
-                        args.append(self.parse_expression())
-                        if not self.accept('SYMBOL', ','):
-                            break
-                self.match('SYMBOL', ')')
-                return ASTNode("FunctionCall", value=id_node.value, children=args, line=token.line)
-
-            return id_node
-
-        # Parenthesized expression
-        if token.type == 'SYMBOL' and token.value == '(':
-            self.current += 1
-            expr = self.parse_expression()
-            self.match('SYMBOL', ')')
+            # Check for pointer types
+            pointer_count = 0
+            while self.match('OPERATOR') and self.previous().value == '*':
+                pointer_count += 1
+            
+            type_name = type_token.value
+            if pointer_count > 0:
+                type_name = type_name + '*' * pointer_count
+            
+            # Get the identifier
+            if not self.check('STANDARD_IDENTIFIER') and not self.check('FUNCTION_CALL'):
+                raise Exception(f"Expected identifier after type {type_name}")
+            
+            identifier_token = self.advance()
+            
+            # Check if it's a function definition
+            if self.match('SYMBOL') and self.previous().value == '(':
+                parameters = self.parameter_list()
+                
+                if not self.match('SYMBOL') or self.previous().value != ')':
+                    raise Exception("Expected ')' after parameter list")
+                
+                # Function body
+                if self.match('SYMBOL') and self.previous().value == '{':
+                    body = self.block_statement()
+                    return FunctionDeclaration(type_name, identifier_token.value, parameters, body)
+                else:
+                    raise Exception("Expected '{' before function body")
+            
+            # Check if it's an array declaration
+            if self.match('SYMBOL') and self.previous().value == '[':
+                # Array declaration
+                size_expr = None
+                if not self.check('SYMBOL') or self.peek().value != ']':
+                    size_expr = self.expression()
+                
+                if not self.match('SYMBOL') or self.previous().value != ']':
+                    raise Exception("Expected ']' after array size")
+                
+                # Handle initialization
+                init_expr = None
+                if self.match('OPERATOR') and self.previous().value == '=':
+                    if self.match('SYMBOL') and self.previous().value == '{':
+                        elements = []
+                        if not self.check('SYMBOL') or self.peek().value != '}':
+                            elements.append(self.expression())
+                            
+                            while self.match('SYMBOL') and self.previous().value == ',':
+                                if self.check('SYMBOL') and self.peek().value == '}':
+                                    break
+                                elements.append(self.expression())
+                        
+                        if not self.match('SYMBOL') or self.previous().value != '}':
+                            raise Exception("Expected '}' after array elements")
+                        
+                        init_expr = elements
+                    else:
+                        init_expr = self.expression()
+                
+                if self.match('SYMBOL') and self.previous().value == ';':
+                    return ArrayDeclaration(type_name, identifier_token.value, size_expr, init_expr)
+                else:
+                    raise Exception("Expected ';' after array declaration")
+            
+            # Variable declaration
+            init_expr = None
+            if self.match('OPERATOR') and self.previous().value == '=':
+                init_expr = self.expression()
+            
+            if self.match('SYMBOL') and self.previous().value == ';':
+                return VarDeclaration(type_name, identifier_token.value, init_expr)
+            else:
+                raise Exception("Expected ';' after variable declaration")
+        
+        # If not a declaration, it's a statement
+        return self.statement()
+    
+    def struct_declaration(self):
+        # Get the struct name if present
+        struct_name = None
+        if self.check('STANDARD_IDENTIFIER') or self.check('FUNCTION_CALL'):
+            struct_name = self.advance().value
+        
+        # Check for struct body
+        if not self.match('SYMBOL') or self.previous().value != '{':
+            raise Exception("Expected '{' after struct declaration")
+        
+        fields = []
+        while not self.check('SYMBOL') or self.peek().value != '}':
+            if self.is_at_end():
+                raise Exception("Unterminated struct declaration")
+            
+            # Parse field type
+            if not self.match('KEYWORD'):
+                raise Exception("Expected field type in struct declaration")
+            
+            field_type = self.previous().value
+            
+            # Check for pointer types
+            pointer_count = 0
+            while self.match('OPERATOR') and self.previous().value == '*':
+                pointer_count += 1
+            
+            if pointer_count > 0:
+                field_type = field_type + '*' * pointer_count
+            
+            # Parse field name
+            if not self.check('STANDARD_IDENTIFIER') and not self.check('FUNCTION_CALL'):
+                raise Exception(f"Expected field name after type {field_type}")
+            
+            field_name = self.advance().value
+            
+            # Check for array field
+            array_size = None
+            if self.match('SYMBOL') and self.previous().value == '[':
+                if not self.check('SYMBOL') or self.peek().value != ']':
+                    array_size = self.expression()
+                
+                if not self.match('SYMBOL') or self.previous().value != ']':
+                    raise Exception("Expected ']' after array size")
+            
+            # End of field declaration
+            if not self.match('SYMBOL') or self.previous().value != ';':
+                raise Exception("Expected ';' after struct field declaration")
+            
+            fields.append(StructField(field_type, field_name, array_size))
+        
+        if not self.match('SYMBOL') or self.previous().value != '}':
+            raise Exception("Expected '}' after struct body")
+        
+        # Check for variable declaration after struct definition
+        var_name = None
+        if self.check('STANDARD_IDENTIFIER') or self.check('FUNCTION_CALL'):
+            var_name = self.advance().value
+        
+        if self.match('SYMBOL') and self.previous().value == ';':
+            return StructDeclaration(struct_name, fields, var_name)
+        else:
+            raise Exception("Expected ';' after struct declaration")
+    
+    def parameter_list(self):
+        parameters = []
+        
+        if self.check('SYMBOL') and self.peek().value == ')':
+            return parameters
+        
+        # Parse first parameter
+        if self.match('KEYWORD'):
+            param_type = self.previous().value
+            
+            # Check for pointer types
+            pointer_count = 0
+            while self.match('OPERATOR') and self.previous().value == '*':
+                pointer_count += 1
+            
+            if pointer_count > 0:
+                param_type = param_type + '*' * pointer_count
+            
+            if not self.check('STANDARD_IDENTIFIER') and not self.check('FUNCTION_CALL'):
+                raise Exception(f"Expected identifier after type {param_type}")
+            
+            identifier_token = self.advance()
+            
+            # Check for array parameter
+            is_array = False
+            if self.match('SYMBOL') and self.previous().value == '[':
+                if not self.match('SYMBOL') or self.previous().value != ']':
+                    raise Exception("Expected ']' after '[' in parameter")
+                is_array = True
+                param_type = param_type + "[]"
+            
+            parameters.append(Parameter(param_type, identifier_token.value))
+        else:
+            raise Exception("Expected parameter type")
+        
+        # Parse the rest of parameters
+        while self.match('SYMBOL') and self.previous().value == ',':
+            if self.match('KEYWORD'):
+                param_type = self.previous().value
+                
+                # Check for pointer types
+                pointer_count = 0
+                while self.match('OPERATOR') and self.previous().value == '*':
+                    pointer_count += 1
+                
+                if pointer_count > 0:
+                    param_type = param_type + '*' * pointer_count
+                
+                if not self.check('STANDARD_IDENTIFIER') and not self.check('FUNCTION_CALL'):
+                    raise Exception(f"Expected identifier after type {param_type}")
+                
+                identifier_token = self.advance()
+                
+                # Check for array parameter
+                is_array = False
+                if self.match('SYMBOL') and self.previous().value == '[':
+                    if not self.match('SYMBOL') or self.previous().value != ']':
+                        raise Exception("Expected ']' after '[' in parameter")
+                    is_array = True
+                    param_type = param_type + "[]"
+                
+                parameters.append(Parameter(param_type, identifier_token.value))
+            else:
+                raise Exception("Expected parameter type")
+        
+        return parameters
+    
+    def statement(self):
+        # Handle different types of statements
+        if self.match('SYMBOL') and self.previous().value == '{':
+            return self.block_statement()
+        
+        elif self.match('CONTROL_FLOW'):
+            control = self.previous().value
+            
+            if control == 'if':
+                return self.if_statement()
+            elif control == 'while':
+                return self.while_statement()
+            elif control == 'do':
+                return self.do_while_statement()
+            elif control == 'for':
+                return self.for_statement()
+            elif control == 'switch':
+                return self.switch_statement()
+        
+        elif self.match('KEYWORD'):
+            keyword = self.previous().value
+            
+            if keyword == 'return':
+                expression = None
+                if not self.check('SYMBOL') or self.peek().value != ';':
+                    expression = self.expression()
+                
+                if self.match('SYMBOL') and self.previous().value == ';':
+                    return ReturnStatement(expression)
+                else:
+                    raise Exception("Expected ';' after return statement")
+            
+            elif keyword == 'break':
+                if self.match('SYMBOL') and self.previous().value == ';':
+                    return BreakStatement()
+                else:
+                    raise Exception("Expected ';' after break statement")
+            
+            elif keyword == 'continue':
+                if self.match('SYMBOL') and self.previous().value == ';':
+                    return ContinueStatement()
+                else:
+                    raise Exception("Expected ';' after continue statement")
+            
+            # Handle variable declarations as statements (in blocks)
+            else:
+                # We consumed the type, so put it back
+                self.current -= 1
+                return self.declaration()
+        
+        # Otherwise, it's an expression statement
+        expression = self.expression()
+        
+        if self.match('SYMBOL') and self.previous().value == ';':
+            return ExpressionStatement(expression)
+        else:
+            raise Exception(f"Expected ';' after expression, got {self.peek().value if not self.is_at_end() else 'EOF'}")
+    
+    def block_statement(self):
+        statements = []
+        
+        while not self.check('SYMBOL') or self.peek().value != '}':
+            if self.is_at_end():
+                raise Exception("Unterminated block statement")
+            
+            statements.append(self.declaration())
+        
+        if not self.match('SYMBOL') or self.previous().value != '}':
+            raise Exception("Expected '}' after block")
+        
+        return BlockStatement(statements)
+    
+    def if_statement(self):
+        if not self.match('SYMBOL') or self.previous().value != '(':
+            raise Exception("Expected '(' after 'if'")
+        
+        condition = self.expression()
+        
+        if not self.match('SYMBOL') or self.previous().value != ')':
+            raise Exception("Expected ')' after if condition")
+        
+        then_branch = self.statement()
+        else_branch = None
+        
+        if self.match('CONTROL_FLOW') and self.previous().value == 'else':
+            else_branch = self.statement()
+        
+        return IfStatement(condition, then_branch, else_branch)
+    
+    def while_statement(self):
+        if not self.match('SYMBOL') or self.previous().value != '(':
+            raise Exception("Expected '(' after 'while'")
+        
+        condition = self.expression()
+        
+        if not self.match('SYMBOL') or self.previous().value != ')':
+            raise Exception("Expected ')' after while condition")
+        
+        body = self.statement()
+        
+        return WhileStatement(condition, body)
+    
+    def do_while_statement(self):
+        body = self.statement()
+        
+        if not self.match('CONTROL_FLOW') or self.previous().value != 'while':
+            raise Exception("Expected 'while' after do statement body")
+        
+        if not self.match('SYMBOL') or self.previous().value != '(':
+            raise Exception("Expected '(' after 'while'")
+        
+        condition = self.expression()
+        
+        if not self.match('SYMBOL') or self.previous().value != ')':
+            raise Exception("Expected ')' after while condition")
+        
+        if not self.match('SYMBOL') or self.previous().value != ';':
+            raise Exception("Expected ';' after do-while statement")
+        
+        return DoWhileStatement(body, condition)
+    
+    def for_statement(self):
+        if not self.match('SYMBOL') or self.previous().value != '(':
+            raise Exception("Expected '(' after 'for'")
+        
+        # Initializer
+        init = None
+        if not self.check('SYMBOL') or self.peek().value != ';':
+            if self.check('KEYWORD'):
+                # It's a variable declaration
+                init = self.declaration()
+            else:
+                # It's an expression
+                init = ExpressionStatement(self.expression())
+                if not self.match('SYMBOL') or self.previous().value != ';':
+                    raise Exception("Expected ';' after for initializer")
+        else:
+            self.advance()  # consume the semicolon
+        
+        # Condition
+        condition = None
+        if not self.check('SYMBOL') or self.peek().value != ';':
+            condition = self.expression()
+        
+        if not self.match('SYMBOL') or self.previous().value != ';':
+            raise Exception("Expected ';' after for condition")
+        
+        # Increment
+        update = None
+        if not self.check('SYMBOL') or self.peek().value != ')':
+            update = self.expression()
+        
+        if not self.match('SYMBOL') or self.previous().value != ')':
+            raise Exception("Expected ')' after for clauses")
+        
+        # Body
+        body = self.statement()
+        
+        return ForStatement(init, condition, update, body)
+    
+    def switch_statement(self):
+        if not self.match('SYMBOL') or self.previous().value != '(':
+            raise Exception("Expected '(' after 'switch'")
+        
+        expression = self.expression()
+        
+        if not self.match('SYMBOL') or self.previous().value != ')':
+            raise Exception("Expected ')' after switch expression")
+        
+        if not self.match('SYMBOL') or self.previous().value != '{':
+            raise Exception("Expected '{' before switch body")
+        
+        cases = []
+        while not self.check('SYMBOL') or self.peek().value != '}':
+            if self.is_at_end():
+                raise Exception("Unterminated switch statement")
+            
+            if self.match('CONTROL_FLOW'):
+                if self.previous().value == 'case':
+                    value = self.expression()
+                    
+                    if not self.match('SYMBOL') or self.previous().value != ':':
+                        raise Exception("Expected ':' after case value")
+                    
+                    statements = []
+                    while (not self.check('CONTROL_FLOW') or (self.peek().value != 'case' and self.peek().value != 'default')) and (not self.check('SYMBOL') or self.peek().value != '}'):
+                        if self.is_at_end():
+                            raise Exception("Unterminated case statement")
+                        
+                        statements.append(self.statement())
+                    
+                    cases.append(CaseStatement(value, statements))
+                
+                elif self.previous().value == 'default':
+                    if not self.match('SYMBOL') or self.previous().value != ':':
+                        raise Exception("Expected ':' after default")
+                    
+                    statements = []
+                    while (not self.check('CONTROL_FLOW') or (self.peek().value != 'case' and self.peek().value != 'default')) and (not self.check('SYMBOL') or self.peek().value != '}'):
+                        if self.is_at_end():
+                            raise Exception("Unterminated default statement")
+                        
+                        statements.append(self.statement())
+                    
+                    cases.append(CaseStatement(None, statements))
+            else:
+                raise Exception("Expected 'case' or 'default' in switch statement")
+        
+        if not self.match('SYMBOL') or self.previous().value != '}':
+            raise Exception("Expected '}' after switch body")
+        
+        return SwitchStatement(expression, cases)
+    
+    def expression(self):
+        return self.conditional_expression()
+    
+    def conditional_expression(self):
+        expr = self.assignment()
+        
+        # Handle ternary conditional expression: condition ? then_expr : else_expr
+        if self.match('OPERATOR') and self.previous().value == '?':
+            then_expr = self.expression()
+            
+            if not self.match('SYMBOL') or self.previous().value != ':':
+                raise Exception("Expected ':' in conditional expression")
+            
+            else_expr = self.conditional_expression()
+            return ConditionalExpression(expr, then_expr, else_expr)
+        
+        return expr
+    
+    def assignment(self):
+        expr = self.logical_or()
+        
+        # Handle assignment expressions (=, +=, -=, etc.)
+        if self.match('OPERATOR') and self.previous().value in ['=', '+=', '-=', '*=', '/=', '%=', '<<=', '>>=', '&=', '^=', '|=']:
+            operator = self.previous().value
+            right = self.assignment()  # Assignment is right-associative
+            
+            # Make sure the left-hand side is a valid assignment target
+            if isinstance(expr, (Identifier, ArrayAccess, StructAccess)):
+                return AssignmentExpression(expr, operator, right)
+            else:
+                raise Exception("Invalid assignment target")
+        
+        return expr
+    
+    def logical_or(self):
+        expr = self.logical_and()
+        
+        while self.match('OPERATOR') and self.previous().value == '||':
+            operator = self.previous().value
+            right = self.logical_and()
+            expr = BinaryExpression(expr, operator, right)
+        
+        return expr
+    
+    def logical_and(self):
+        expr = self.bitwise_or()
+        
+        while self.match('OPERATOR') and self.previous().value == '&&':
+            operator = self.previous().value
+            right = self.bitwise_or()
+            expr = BinaryExpression(expr, operator, right)
+        
+        return expr
+    
+    def bitwise_or(self):
+        expr = self.bitwise_xor()
+        
+        while self.match('OPERATOR') and self.previous().value == '|':
+            operator = self.previous().value
+            right = self.bitwise_xor()
+            expr = BinaryExpression(expr, operator, right)
+        
+        return expr
+    
+    def bitwise_xor(self):
+        expr = self.bitwise_and()
+        
+        while self.match('OPERATOR') and self.previous().value == '^':
+            operator = self.previous().value
+            right = self.bitwise_and()
+            expr = BinaryExpression(expr, operator, right)
+        
+        return expr
+    
+    def bitwise_and(self):
+        expr = self.equality()
+        
+        while self.match('OPERATOR') and self.previous().value == '&':
+            operator = self.previous().value
+            right = self.equality()
+            expr = BinaryExpression(expr, operator, right)
+        
+        return expr
+    
+    def equality(self):
+        expr = self.comparison()
+        
+        while self.match('OPERATOR') and self.previous().value in ['==', '!=']:
+            operator = self.previous().value
+            right = self.comparison()
+            expr = BinaryExpression(expr, operator, right)
+        
+        return expr
+    
+    def comparison(self):
+        expr = self.shift()
+        
+        while self.match('OPERATOR') and self.previous().value in ['<', '>', '<=', '>=']:
+            operator = self.previous().value
+            right = self.shift()
+            expr = BinaryExpression(expr, operator, right)
+        
+        return expr
+    
+    def shift(self):
+        expr = self.term()
+        
+        while self.match('OPERATOR') and self.previous().value in ['<<', '>>']:
+            operator = self.previous().value
+            right = self.term()
+            expr = BinaryExpression(expr, operator, right)
+        
+        return expr
+    
+    def term(self):
+        expr = self.factor()
+        
+        while self.match('OPERATOR') and self.previous().value in ['+', '-']:
+            operator = self.previous().value
+            right = self.factor()
+            expr = BinaryExpression(expr, operator, right)
+        
+        return expr
+    
+    def factor(self):
+        expr = self.unary()
+        
+        while self.match('OPERATOR') and self.previous().value in ['*', '/', '%']:
+            operator = self.previous().value
+            right = self.unary()
+            expr = BinaryExpression(expr, operator, right)
+        
+        return expr
+    
+    def unary(self):
+        # Handle sizeof operator
+        if self.match('KEYWORD') and self.previous().value == 'sizeof':
+            if self.match('SYMBOL') and self.previous().value == '(':
+                # Check if it's a type name or an expression
+                if self.check('KEYWORD'):
+                    type_name = self.advance().value
+                    
+                    # Check for pointer types
+                    pointer_count = 0
+                    while self.match('OPERATOR') and self.previous().value == '*':
+                        pointer_count += 1
+                    
+                    if pointer_count > 0:
+                        type_name = type_name + '*' * pointer_count
+                    
+                    if not self.match('SYMBOL') or self.previous().value != ')':
+                        raise Exception("Expected ')' after sizeof type")
+                    
+                    return SizeofExpression(type_name, is_type=True)
+                else:
+                    expr = self.expression()
+                    
+                    if not self.match('SYMBOL') or self.previous().value != ')':
+                        raise Exception("Expected ')' after sizeof expression")
+                    
+                    return SizeofExpression(expr, is_type=False)
+            else:
+                # sizeof applied to a primary expression without parentheses
+                expr = self.primary()
+                return SizeofExpression(expr, is_type=False)
+        
+        # Handle type casting
+        if self.match('SYMBOL') and self.previous().value == '(':
+            if self.check('KEYWORD'):
+                type_name = self.advance().value
+                
+                # Check for pointer types
+                pointer_count = 0
+                while self.match('OPERATOR') and self.previous().value == '*':
+                    pointer_count += 1
+                
+                if pointer_count > 0:
+                    type_name = type_name + '*' * pointer_count
+                
+                if self.match('SYMBOL') and self.previous().value == ')':
+                    expr = self.unary()  # Cast has same precedence as unary operators
+                    return TypeCastExpression(type_name, expr)
+                else:
+                    # Not a type cast, restore position and treat as a grouped expression
+                    self.current -= 2 + pointer_count
+            else:
+                # Not a type cast, restore position
+                self.current -= 1
+        
+        # Handle prefix operators
+        if self.match('OPERATOR') and self.previous().value in ['!', '-', '+', '++', '--', '~', '&', '*']:
+            operator = self.previous().value
+            right = self.unary()
+            return UnaryExpression(operator, right, is_prefix=True)
+        
+        expr = self.postfix()
+        return expr
+    
+    def postfix(self):
+        expr = self.primary()
+        
+        while True:
+            # Handle postfix operators
+            if self.match('OPERATOR') and self.previous().value in ['++', '--']:
+                operator = self.previous().value
+                expr = UnaryExpression(operator, expr, is_prefix=False)
+            
+            # Handle array access
+            elif self.match('SYMBOL') and self.previous().value == '[':
+                index = self.expression()
+                
+                if not self.match('SYMBOL') or self.previous().value != ']':
+                    raise Exception("Expected ']' after array index")
+                
+                expr = ArrayAccess(expr, index)
+            
+            # Handle struct/union member access
+            elif self.match('OPERATOR') and self.previous().value in ['.', '->']:
+                operator = self.previous().value
+                
+                if not self.check('STANDARD_IDENTIFIER') and not self.check('FUNCTION_CALL'):
+                    raise Exception("Expected field name after '.' or '->'")
+                
+                field = self.advance().value
+                expr = StructAccess(expr, operator, field)
+            
+            # Handle function call
+            elif self.match('SYMBOL') and self.previous().value == '(':
+                arguments = []
+                if not self.check('SYMBOL') or self.peek().value != ')':
+                    arguments.append(self.expression())
+                    
+                    while self.match('SYMBOL') and self.previous().value == ',':
+                        arguments.append(self.expression())
+                
+                if not self.match('SYMBOL') or self.previous().value != ')':
+                    raise Exception("Expected ')' after function arguments")
+                
+                # If expr is an identifier, create a FunctionCall directly
+                if isinstance(expr, Identifier):
+                    expr = FunctionCall(expr.name, arguments)
+                else:
+                    # Otherwise, it's a function pointer call
+                    expr = FunctionCall(expr, arguments, is_ptr_call=True)
+            else:
+                break
+        
+        return expr
+    
+    def primary(self):
+        if self.match('NUMBER'):
+            return Literal(self.previous().value, "NUMBER")
+        
+        if self.match('STRING'):
+            return Literal(self.previous().value, "STRING")
+        
+        if self.match('CHAR_LITERAL'):
+            return Literal(self.previous().value, "CHAR_LITERAL")
+        
+        if self.match('STANDARD_IDENTIFIER'):
+            return Identifier(self.previous().value)
+        
+        if self.match('FUNCTION_CALL'):
+            return Identifier(self.previous().value)
+        
+        if self.match('SYMBOL') and self.previous().value == '(':
+            expr = self.expression()
+            
+            if not self.match('SYMBOL') or self.previous().value != ')':
+                raise Exception("Expected ')' after expression")
+            
             return expr
+        
+        raise Exception(f"Unexpected token: {self.peek().value if not self.is_at_end() else 'EOF'}")
+    
+    def match(self, token_type):
+        if self.check(token_type):
+            self.advance()
+            return True
+        return False
+    
+    def check(self, token_type):
+        if self.is_at_end():
+            return False
+        return self.peek().type == token_type
+    
+    def advance(self):
+        if not self.is_at_end():
+            self.current += 1
+        return self.previous()
+    
+    def is_at_end(self):
+        return self.current >= len(self.tokens)
+    
+    def peek(self):
+        return self.tokens[self.current]
+    
+    def previous(self):
+        return self.tokens[self.current - 1]
+    
+    def synchronize(self):
+        self.advance()
+        
+        while not self.is_at_end():
+            if self.previous().value == ';':
+                return
+            
+            if self.peek().type in ['KEYWORD', 'CONTROL_FLOW']:
+                if self.peek().value in ['if', 'while', 'for', 'return', 'break', 'continue', 'int', 'char', 'float', 'double', 'void', 'struct']:
+                    return
+            
+            self.advance()
 
-        raise SyntaxError(f"Unexpected token: {token.value}", token.line, 0)
+# Example usage
+if __name__ == "__main__":
+    print("Enter C code (press Enter twice to finish input):")
+    user_input = ''
+    while True:
+        line = input()
+        if line == '':
+            break
+        user_input += line + '\n'
+
+    # Create a lexer instance using the provided Lexical class
+    lexer = Lexical(user_input)
+    tokens, lex_errors = lexer.get_tokens()
+
+    print(f"\n{'TOKEN VALUE':<30} {'TOKEN TYPE':<20} LINE")
+    print('-' * 70)
+    for token in tokens:
+        print(token)
+
+    # Display lexical error messages
+    if lex_errors:
+        print("\nLexical Errors:")
+        for error in lex_errors:
+            print(error)
+    
+    # Parse the tokens to create an AST
+    parser = Parser(tokens)
+    ast, parse_errors = parser.parse()
+    
+    # Display parse error messages
+    if parse_errors:
+        print("\nParse Errors:")
+        for error in parse_errors:
+            print(error)
+    
+    print("\nAbstract Syntax Tree:")
+    print(ast)

@@ -1,15 +1,15 @@
-class Semantic:  # Define a class named 'Semantic' which will hold all functionality for semantic analysis.
+class Semantic: 
 
-    def analyze_code(lines):  # Define a function that analyzes a list of code lines.
+    def analyze_code(lines):  
         errors = False  # Flag to check if any semantic errors are found.
-        struct_definitions = set()  # Set to store names of user-defined structs (ensures uniqueness).
+        struct_definitions = set()  # Set to store names of user-defined structs (ensures uniqueness)
         declared_variables = {}  # Dictionary to track declared variables and their types.
 
-        for i, line in enumerate(lines):  # Loop over each line with its index.
+        for i, line in enumerate(lines):  # Loop over each line with its index
             line = line.strip()  # Remove leading and trailing whitespace.
             # Rule: Detect division by zero
-            division_by_zero_pattern = r"/\s*0(\D|$)"
-            if re.search(division_by_zero_pattern, line):
+            division_by_zero_pattern = r"/\s*0(\D|$)" # raw string
+            if re.search(division_by_zero_pattern, line): 
                 print(f"Line {i + 1}: Error - Division by zero detected.")
                 errors = True
 
@@ -19,12 +19,12 @@ class Semantic:  # Define a class named 'Semantic' which will hold all functiona
                 errors = True  # Set error flag to True.
                 continue  # Skip further processing for this line.
 
-            # Detect struct definition using regex pattern matching.
-            struct_match = re.match(r"struct\s+(\w+)\s*{", line)  # Match 'struct Name {' pattern.
+            # SKIP
+            struct_match = re.match(r"struct\s+(\w+)\s*{", line)  
             if struct_match:
-                struct_name = struct_match.group(1)  # Extract struct name.
-                struct_definitions.add(struct_name)  # Add to defined structs set.
-                continue  # Skip further checks for this struct definition.
+                struct_name = struct_match.group(1)  
+                struct_definitions.add(struct_name)  
+                continue 
 
             # If line contains an assignment ('='), separate declaration from value.
             if "=" in line:
@@ -48,15 +48,15 @@ class Semantic:  # Define a class named 'Semantic' which will hold all functiona
                 errors = True
                 continue
 
-            var_type = var_parts[0]  # Extract data type (e.g., int).
-            var_name = var_parts[1]  # Extract variable name.
+            var_type = var_parts[0]  
+            var_name = var_parts[1]  
 
             # Detect if the variable is an array and count its dimensions.
             size_match = re.findall(r"\[(\d*)\]", var_name)  # Find all index sizes like [2][3].
             dimensions = [int(dim) for dim in size_match if dim.isdigit()]  # Convert to integers if digits.
             is_2d_array = len(dimensions) == 2  # Check if it's a 2D array.
             is_1d_array = len(dimensions) == 1 or "[]" in var_name  # Check if it's a 1D array.
-            is_array = is_1d_array or is_2d_array  # Boolean flag for any array.
+            is_array = is_1d_array or is_2d_array  # Boolean flag 
 
             if is_array:
                 var_type = var_type.replace("[]", "")  # Remove '[]' if present from type.

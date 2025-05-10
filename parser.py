@@ -239,9 +239,9 @@ def main():
 
     # First pass: Lexical analysis
     lexer = Lexical(user_input)
-    tokens, lexical_errors = lexer.get_tokens()
+    tokens, lexical_errors = lexer.get_tokens()  # Changed from tokenize() to get_tokens()
 
-    # Display lexical errors if any
+    # Check for lexical errors first
     if lexical_errors:
         print("\nLexical Errors:")
         for error in lexical_errors:

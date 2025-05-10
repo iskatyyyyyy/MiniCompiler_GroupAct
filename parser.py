@@ -237,7 +237,8 @@ def main():
             break
         user_input += line + '\n'
 
-    tokens = lexer.get_tokens()  # tokens from lexer using get_tokens()
+    lexer = Lexical(user_input)
+    tokens, lexical_errors = lexer.get_tokens()  # get tokens from lexer using get_tokens()
 
     # Second pass: Syntax analysis
     parser = Parser(tokens)

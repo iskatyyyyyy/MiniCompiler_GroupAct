@@ -16,6 +16,7 @@ class Lexical:
         self.pos = -1
         self.line = 1
         self.current_char = None
+        self.errors = []  # Initialize errors list
         self.advanceNextChar()
 
     def advanceNextChar(self):

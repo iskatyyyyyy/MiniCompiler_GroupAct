@@ -1,694 +1,988 @@
-from lexical import Lexical
-from ast_nodes import *
+from lexical import Lexical, Tokens
+from typing import List, Optional, Tuple, Union, Dict, Any
+
+# AST Node classes
+class ASTNode:
+    def __init__(self, line: int):
+        self.line = line
+    
+    def __str__(self):
+        return self.__repr__()
+
+class Program(ASTNode):
+    def __init__(self, declarations: List[ASTNode], line: int):
+        super().__init__(line)
+        self.declarations = declarations
+    
+    def __repr__(self):
+        return f"Program(declarations={len(self.declarations)})"
+
+class Declaration(ASTNode):
+    pass
+
+class VarDeclaration(Declaration):
+    def __init__(self, type_spec: str, var_name: str, array_size: Optional[ASTNode] = None, line: int = 0):
+        super().__init__(line)
+        self.type_spec = type_spec
+        self.var_name = var_name
+        self.array_size = array_size
+    
+    def __repr__(self):
+        array_suffix = f"[{self.array_size}]" if self.array_size else ""
+        return f"VarDeclaration({self.type_spec} {self.var_name}{array_suffix})"
+
+class FunctionDeclaration(Declaration):
+    def __init__(self, return_type: str, name: str, params: List[VarDeclaration], 
+                 body: Optional['CompoundStatement'] = None, line: int = 0):
+        super().__init__(line)
+        self.return_type = return_type
+        self.name = name
+        self.params = params
+        self.body = body
+    
+    def __repr__(self):
+        return f"FunctionDeclaration({self.return_type} {self.name}({len(self.params)} params))"
+
+class Statement(ASTNode):
+    pass
+
+class ExpressionStatement(Statement):
+    def __init__(self, expression: Optional['Expression'], line: int):
+        super().__init__(line)
+        self.expression = expression
+    
+    def __repr__(self):
+        return f"ExpressionStatement({self.expression})"
+
+class CompoundStatement(Statement):
+    def __init__(self, local_declarations: List[VarDeclaration], statements: List[Statement], line: int):
+        super().__init__(line)
+        self.local_declarations = local_declarations
+        self.statements = statements
+    
+    def __repr__(self):
+        return f"CompoundStatement(locals={len(self.local_declarations)}, stmts={len(self.statements)})"
+
+class IfStatement(Statement):
+    def __init__(self, condition: 'Expression', if_body: Statement, 
+                 else_body: Optional[Statement] = None, line: int = 0):
+        super().__init__(line)
+        self.condition = condition
+        self.if_body = if_body
+        self.else_body = else_body
+    
+    def __repr__(self):
+        has_else = "with else" if self.else_body else "no else"
+        return f"IfStatement({has_else})"
+
+class WhileStatement(Statement):
+    def __init__(self, condition: 'Expression', body: Statement, line: int):
+        super().__init__(line)
+        self.condition = condition
+        self.body = body
+    
+    def __repr__(self):
+        return f"WhileStatement()"
+
+class DoWhileStatement(Statement):
+    def __init__(self, body: Statement, condition: 'Expression', line: int):
+        super().__init__(line)
+        self.body = body
+        self.condition = condition
+    
+    def __repr__(self):
+        return f"DoWhileStatement()"
+
+class ForStatement(Statement):
+    def __init__(self, init: Optional['Expression'], condition: Optional['Expression'], 
+                 update: Optional['Expression'], body: Statement, line: int):
+        super().__init__(line)
+        self.init = init
+        self.condition = condition
+        self.update = update
+        self.body = body
+    
+    def __repr__(self):
+        return f"ForStatement()"
+
+class SwitchStatement(Statement):
+    def __init__(self, expression: 'Expression', cases: List['CaseStatement'], 
+                 default_case: Optional['DefaultStatement'], line: int):
+        super().__init__(line)
+        self.expression = expression
+        self.cases = cases
+        self.default_case = default_case
+    
+    def __repr__(self):
+        return f"SwitchStatement(cases={len(self.cases)}, has_default={self.default_case is not None})"
+
+class CaseStatement(Statement):
+    def __init__(self, value: 'Expression', statements: List[Statement], line: int):
+        super().__init__(line)
+        self.value = value
+        self.statements = statements
+    
+    def __repr__(self):
+        return f"CaseStatement(value={self.value}, stmts={len(self.statements)})"
+
+class DefaultStatement(Statement):
+    def __init__(self, statements: List[Statement], line: int):
+        super().__init__(line)
+        self.statements = statements
+    
+    def __repr__(self):
+        return f"DefaultStatement(stmts={len(self.statements)})"
+
+class ReturnStatement(Statement):
+    def __init__(self, expression: Optional['Expression'], line: int):
+        super().__init__(line)
+        self.expression = expression
+    
+    def __repr__(self):
+        return f"ReturnStatement({self.expression})"
+
+class BreakStatement(Statement):
+    def __init__(self, line: int):
+        super().__init__(line)
+    
+    def __repr__(self):
+        return "BreakStatement()"
+
+class ContinueStatement(Statement):
+    def __init__(self, line: int):
+        super().__init__(line)
+    
+    def __repr__(self):
+        return "ContinueStatement()"
+
+class Expression(ASTNode):
+    pass
+
+class LiteralExpression(Expression):
+    def __init__(self, value: str, literal_type: str, line: int):
+        super().__init__(line)
+        self.value = value
+        self.literal_type = literal_type  # number, string, char
+    
+    def __repr__(self):
+        return f"LiteralExpression({self.literal_type}: {self.value})"
+
+class IdentifierExpression(Expression):
+    def __init__(self, name: str, line: int):
+        super().__init__(line)
+        self.name = name
+    
+    def __repr__(self):
+        return f"IdentifierExpression({self.name})"
+
+class ArrayAccessExpression(Expression):
+    def __init__(self, array: Expression, index: Expression, line: int):
+        super().__init__(line)
+        self.array = array
+        self.index = index
+    
+    def __repr__(self):
+        return f"ArrayAccessExpression({self.array}[{self.index}])"
+
+class FunctionCallExpression(Expression):
+    def __init__(self, function: Expression, arguments: List[Expression], line: int):
+        super().__init__(line)
+        self.function = function
+        self.arguments = arguments
+    
+    def __repr__(self):
+        return f"FunctionCallExpression({self.function}, args={len(self.arguments)})"
+
+class UnaryExpression(Expression):
+    def __init__(self, operator: str, operand: Expression, line: int):
+        super().__init__(line)
+        self.operator = operator
+        self.operand = operand
+    
+    def __repr__(self):
+        return f"UnaryExpression({self.operator}{self.operand})"
+
+class BinaryExpression(Expression):
+    def __init__(self, left: Expression, operator: str, right: Expression, line: int):
+        super().__init__(line)
+        self.left = left
+        self.operator = operator
+        self.right = right
+    
+    def __repr__(self):
+        return f"BinaryExpression({self.left} {self.operator} {self.right})"
+
+class AssignmentExpression(Expression):
+    def __init__(self, left: Expression, operator: str, right: Expression, line: int):
+        super().__init__(line)
+        self.left = left
+        self.operator = operator
+        self.right = right
+    
+    def __repr__(self):
+        return f"AssignmentExpression({self.left} {self.operator} {self.right})"
 
 class Parser:
-    def __init__(self, lexer):
-        self.tokens = []
-        self.current_pos = -1
-        self.current_token = None
-        tokens, lexer_errors = lexer.get_tokens()
+    def __init__(self, tokens: List[Tokens]):
         self.tokens = tokens
-        self.errors = lexer_errors.copy()  # Start with any lexer errors
-        self.advance()  # Initialize first token
-
-    def advance(self):
-        """Advance to the next token."""
-        self.current_pos += 1
-        if self.current_pos < len(self.tokens):
-            self.current_token = self.tokens[self.current_pos]
-        else:
-            self.current_token = None
-
-    def peek(self):
-        """Look at the next token without consuming it."""
-        if self.current_pos + 1 < len(self.tokens):
-            return self.tokens[self.current_pos + 1]
+        self.current = 0
+        self.errors = []
+        self.synchronization_tokens = {'if', 'else', 'while', 'for', 'do', 'return', 'switch', 'case', 'default', 'break', 'continue', ';', '{', '}'}
+    
+    def advance(self) -> Tokens:
+        """Advance to the next token and return the previous token"""
+        prev = self.current_token()
+        self.current += 1
+        return prev
+    
+    def current_token(self) -> Tokens:
+        """Get the current token"""
+        if self.current < len(self.tokens):
+            return self.tokens[self.current]
         return None
-
-    def error(self, message):
-        """Add an error message to the error list."""
-        if self.current_token:
-            error = f"Line {self.current_token.line}: {message}"
+    
+    def peek(self, offset: int = 1) -> Tokens:
+        """Look ahead at future tokens without advancing"""
+        if self.current + offset < len(self.tokens):
+            return self.tokens[self.current + offset]
+        return None
+    
+    def check(self, token_type: str, token_value: str = None) -> bool:
+        """Check if the current token matches the expected type/value"""
+        if self.is_at_end():
+            return False
+        
+        current = self.current_token()
+        if token_value:
+            return current.type == token_type and current.value == token_value
         else:
-            error = f"End of file: {message}"
-        self.errors.append(error)
-
-    def expect(self, token_type, value=None):
-        """Verify the current token matches expected type/value and advance."""
-        if not self.current_token:
-            self.error(f"Expected {value if value else token_type}, but found end of file")
-            return False
+            return current.type == token_type
+    
+    def match(self, token_type: str, token_value: str = None) -> bool:
+        """Check if current token matches, and advance if it does"""
+        if self.check(token_type, token_value):
+            self.advance()
+            return True
+        return False
+    
+    def consume(self, token_type: str, token_value: str = None, error_message: str = None) -> Optional[Tokens]:
+        """Consume the expected token or report an error"""
+        if self.check(token_type, token_value):
+            return self.advance()
         
-        if self.current_token.type != token_type:
-            self.error(f"Expected {token_type}, but found {self.current_token.type}")
-            return False
+        token = self.current_token()
+        message = error_message or f"Expected {token_type}"
+        if token_value:
+            message += f" '{token_value}'"
         
-        if value and self.current_token.value != value:
-            self.error(f"Expected '{value}', but found '{self.current_token.value}'")
-            return False
+        if token:
+            self.error(message, token.line)
+            return token
+        else:
+            self.error(message, -1)  # End of file
+            return None
+    
+    def error(self, message: str, line: int) -> None:
+        """Report a parsing error"""
+        error_msg = f"Error at line {line}: {message}"
+        self.errors.append(error_msg)
+    
+    def is_at_end(self) -> bool:
+        """Check if we've reached the end of input"""
+        return self.current >= len(self.tokens)
+    
+    def synchronize(self) -> None:
+        """Error recovery - skip tokens until a synchronization point"""
+        self.advance()  # Skip the token that caused the error
         
-        self.advance()
-        return True
-
-    def synchronize(self):
-        """Skip tokens until a safe point for error recovery."""
-        while self.current_token:
-            if self.current_token.type == 'SYMBOL' and self.current_token.value in {';', '}'}:
-                self.advance()  # Consume the synchronization point
+        while not self.is_at_end():
+            # Synchronize on statement boundaries
+            token = self.current_token()
+            
+            # Reached end of statement or beginning of new block
+            if token.value in self.synchronization_tokens or token.value == ';':
                 return
-            if self.current_token.type in {'KEYWORD', 'CONTROL_FLOW'} and \
-               self.current_token.value in {'int', 'float', 'void', 'if', 'while', 'for', 'return'}:
-                return  # Stop at the start of next statement/declaration
+            
             self.advance()
-
-    def parse_program(self):
-        """Parse the entire program."""
+    
+    def parse(self) -> Tuple[Program, List[str]]:
+        """Parse the tokens into an AST"""
+        try:
+            ast = self.program()
+            return ast, self.errors
+        except Exception as e:
+            self.error(f"Unexpected error: {str(e)}", -1)
+            return None, self.errors
+    
+    # Recursive Descent Parsing Methods
+    
+    def program(self) -> Program:
+        """Parse the entire program: program -> declaration*"""
         declarations = []
-        while self.current_token:
+        
+        while not self.is_at_end():
             try:
-                if self.current_token.type == 'KEYWORD':
-                    # Function or variable declaration
-                    if self.peek() and self.peek().type == 'IDENTIFIER':
-                        if self.peek().value == 'main' or \
-                           (len(self.tokens) > self.current_pos + 2 and 
-                            self.tokens[self.current_pos + 2].value == '('):
-                            decl = self.parse_function_definition()
-                        else:
-                            decl = self.parse_declaration()
-                        
-                        if decl:
-                            declarations.append(decl)
-                    else:
-                        self.error("Expected identifier after type")
-                        self.synchronize()
-                else:
-                    self.error(f"Unexpected token {self.current_token.value}")
-                    self.synchronize()
+                declarations.append(self.declaration())
             except Exception as e:
-                self.error(f"Internal error: {str(e)}")
+                self.error(f"Error in declaration: {str(e)}", 
+                          self.current_token().line if self.current_token() else -1)
                 self.synchronize()
-                continue
-
-        return ProgramNode(declarations)
-
-    def parse_function_definition(self):
-        """Parse a function definition."""
-        return_type = self.current_token.value
-        self.advance()
-
-        if not self.expect('IDENTIFIER'):
-            return None
-
-        name = self.tokens[self.current_pos - 1].value
-        line = self.tokens[self.current_pos - 1].line
-
-        if not self.expect('SYMBOL', '('):
-            return None
-
-        # Parse parameters
-        parameters = []
-        while self.current_token and self.current_token.value != ')':
-            if self.current_token.type == 'KEYWORD':
-                param_type = self.current_token.value
-                self.advance()
-
-                if not self.expect('IDENTIFIER'):
-                    break
-
-                param_name = self.tokens[self.current_pos - 1].value
-                param_line = self.tokens[self.current_pos - 1].line
-                parameters.append(ParameterNode(param_type, param_name, param_line))
-
-                if self.current_token and self.current_token.value == ',':
-                    self.advance()
-                    if self.current_token.value == ')':
-                        self.error("Expected parameter after comma")
-            else:
-                self.error("Expected parameter type")
-                break
-
-        if not self.expect('SYMBOL', ')'):
-            return None
-
-        # Parse function body
-        body = self.parse_block()
-        if not body:
-            return None
-
-        return FunctionNode(return_type, name, parameters, body, line)
-
-    def parse_declaration(self):
-        """Parse a variable declaration."""
-        type_name = self.current_token.value
-        self.advance()
-
-        if not self.expect('IDENTIFIER'):
-            return None
-
-        name = self.tokens[self.current_pos - 1].value
-        line = self.tokens[self.current_pos - 1].line
-        init_value = None
-
-        if self.current_token and self.current_token.value == '=':
-            self.advance()
-            init_value = self.parse_expression()
-
-        if not self.expect('SYMBOL', ';'):
-            self.error("Expected ';' after declaration")
+        
+        return Program(declarations, 1)  # Start at line 1
+    
+    def declaration(self) -> Declaration:
+        """Parse a declaration: declaration -> var_declaration | function_declaration"""
+        # Parse type specifier
+        if not self.check('KEYWORD'):
+            self.error("Expected type specifier", self.current_token().line)
             self.synchronize()
             return None
-
-        return DeclarationNode(type_name, name, init_value, line)
-
-    def parse_block(self):
-        """Parse a block of statements."""
-        if not self.expect('SYMBOL', '{'):
-            return None
-
-        statements = []
-        while self.current_token and self.current_token.value != '}':
-            stmt = self.parse_statement()
-            if stmt:
-                statements.append(stmt)
-
-        if not self.expect('SYMBOL', '}'):
-            self.error("Expected '}' at end of block")
-            return None
-
-        return BlockNode(statements)
-
-    def parse_statement(self):
-        """Parse a statement."""
-        if not self.current_token:
-            self.error("Unexpected end of file")
-            return None
-
-        if self.current_token.type == 'CONTROL_FLOW':
-            if self.current_token.value == 'if':
-                return self.parse_if_statement()
-            elif self.current_token.value == 'while':
-                return self.parse_while_statement()
-            elif self.current_token.value == 'do':
-                return self.parse_do_while_statement()
-            elif self.current_token.value == 'for':
-                return self.parse_for_statement()
-            elif self.current_token.value == 'switch':
-                return self.parse_switch_statement()
-            elif self.current_token.value == 'break':
-                return self.parse_break_statement()
-            elif self.current_token.value == 'continue':
-                return self.parse_continue_statement()
-            elif self.current_token.value == 'return':
-                return self.parse_return_statement()
-
-        elif self.current_token.type == 'KEYWORD':
-            return self.parse_declaration()
-
-        elif self.current_token.type == 'SYMBOL' and self.current_token.value == '{':
-            return self.parse_block()
-
-        else:
-            # Expression statement
-            expr = self.parse_expression()
-            if not self.expect('SYMBOL', ';'):
-                self.error("Expected ';' after expression")
-                self.synchronize()
-                return None
-            return expr
-
-    def parse_if_statement(self):
-        """Parse an if statement."""
-        self.advance()  # Skip 'if'
         
-        if not self.expect('SYMBOL', '('):
-            return None
-            
-        condition = self.parse_expression()
-        
-        if not self.expect('SYMBOL', ')'):
-            return None
-            
-        true_body = self.parse_statement()
-        false_body = None
-        
-        # Check for else
-        if self.current_token and self.current_token.value == 'else':
-            self.advance()
-            false_body = self.parse_statement()
-            
-        return IfNode(condition, true_body, false_body)
-
-    def parse_while_statement(self):
-        """Parse a while statement."""
-        line = self.current_token.line
-        self.advance()  # Skip 'while'
-        
-        if not self.expect('SYMBOL', '('):
-            return None
-            
-        condition = self.parse_expression()
-        
-        if not self.expect('SYMBOL', ')'):
-            return None
-            
-        body = self.parse_statement()
-        return WhileNode(condition, body, line)
-
-    def parse_do_while_statement(self):
-        """Parse a do-while statement."""
-        line = self.current_token.line
-        self.advance()  # Skip 'do'
-        
-        body = self.parse_statement()
-        
-        if not self.expect('CONTROL_FLOW', 'while'):
-            return None
-            
-        if not self.expect('SYMBOL', '('):
-            return None
-            
-        condition = self.parse_expression()
-        
-        if not self.expect('SYMBOL', ')'):
-            return None
-            
-        if not self.expect('SYMBOL', ';'):
-            return None
-            
-        return DoWhileNode(body, condition, line)
-
-    def parse_for_statement(self):
-        """Parse a for statement."""
-        line = self.current_token.line
-        self.advance()  # Skip 'for'
-        
-        if not self.expect('SYMBOL', '('):
-            return None
-            
-        # Initialize
-        init = None
-        if self.current_token.value != ';':
-            if self.current_token.type == 'KEYWORD':
-                init = self.parse_declaration()
-            else:
-                init = self.parse_expression()
-                if not self.expect('SYMBOL', ';'):
-                    return None
-        else:
-            self.advance()  # Skip ';'
-            
-        # Condition
-        condition = None
-        if self.current_token.value != ';':
-            condition = self.parse_expression()
-        if not self.expect('SYMBOL', ';'):
-            return None
-            
-        # Update
-        update = None
-        if self.current_token.value != ')':
-            update = self.parse_expression()
-        if not self.expect('SYMBOL', ')'):
-            return None
-            
-        body = self.parse_statement()
-        return ForNode(init, condition, update, body, line)
-
-    def parse_switch_statement(self):
-        """Parse a switch statement."""
-        line = self.current_token.line
-        self.advance()  # Skip 'switch'
-        
-        if not self.expect('SYMBOL', '('):
-            return None
-            
-        expression = self.parse_expression()
-        
-        if not self.expect('SYMBOL', ')'):
-            return None
-            
-        if not self.expect('SYMBOL', '{'):
-            return None
-            
-        cases = []
-        while self.current_token and self.current_token.value != '}':
-            if self.current_token.value == 'case' or self.current_token.value == 'default':
-                case = self.parse_case()
-                if case:
-                    cases.append(case)
-            else:
-                self.error("Expected 'case' or 'default'")
-                self.synchronize()
-                
-        if not self.expect('SYMBOL', '}'):
-            return None
-            
-        return SwitchNode(expression, cases, line)
-
-    def parse_case(self):
-        """Parse a case in a switch statement."""
-        is_default = self.current_token.value == 'default'
-        line = self.current_token.line
+        type_spec = self.current_token().value
+        line = self.current_token().line
         self.advance()
         
-        value = None
-        if not is_default:
-            value = self.parse_expression()
-            
-        if not self.expect('SYMBOL', ':'):
+        # Parse identifier
+        if not (self.check('IDENTIFIER') or self.check('STANDARD_IDENTIFIER') or self.check('FUNCTION_CALL')):
+            self.error("Expected identifier after type specifier", self.current_token().line)
+            self.synchronize()
             return None
+        
+        identifier = self.current_token().value
+        self.advance()
+        
+        # Check if this is a function declaration or variable declaration
+        if self.check('SYMBOL', '('):
+            # Function declaration
+            return self.finish_function_declaration(type_spec, identifier, line)
+        else:
+            # Variable declaration
+            return self.finish_var_declaration(type_spec, identifier, line)
+    
+    def finish_var_declaration(self, type_spec: str, var_name: str, line: int) -> VarDeclaration:
+        """Finish parsing a variable declaration"""
+        array_size = None
+        
+        # Check for array declaration
+        if self.match('SYMBOL', '['):
+            # Array declaration with size
+            if self.check('NUMBER'):
+                array_size = LiteralExpression(self.current_token().value, 'number', self.current_token().line)
+                self.advance()
+            else:
+                self.error("Expected array size", self.current_token().line)
             
+            self.consume('SYMBOL', ']', "Expected ']' after array size")
+        
+        # Expect semicolon
+        self.consume('SYMBOL', ';', "Expected ';' after variable declaration")
+        
+        return VarDeclaration(type_spec, var_name, array_size, line)
+    
+    def finish_function_declaration(self, return_type: str, name: str, line: int) -> FunctionDeclaration:
+        """Finish parsing a function declaration"""
+        # Consume opening parenthesis
+        self.advance()  # Consume '('
+        
+        # Parse parameters
+        params = []
+        if not self.check('SYMBOL', ')'):
+            params = self.parameter_list()
+        
+        # Consume closing parenthesis
+        self.consume('SYMBOL', ')', "Expected ')' after function parameters")
+        
+        # Function declaration (prototype) or definition?
+        if self.match('SYMBOL', ';'):
+            # Function prototype only
+            return FunctionDeclaration(return_type, name, params, None, line)
+        elif self.check('SYMBOL', '{'):
+            # Function definition with body
+            body = self.compound_statement()
+            return FunctionDeclaration(return_type, name, params, body, line)
+        else:
+            self.error("Expected ';' or '{' after function declaration", self.current_token().line)
+            self.synchronize()
+            return FunctionDeclaration(return_type, name, params, None, line)  # Return what we have so far
+    
+    def parameter_list(self) -> List[VarDeclaration]:
+        """Parse function parameters: param_list -> param (',' param)*"""
+        params = []
+        
+        while True:
+            # Parse parameter type
+            if not self.check('KEYWORD'):
+                self.error("Expected type specifier in parameter", self.current_token().line)
+                break
+            
+            param_type = self.current_token().value
+            line = self.current_token().line
+            self.advance()
+            
+            # Parse parameter name
+            if not self.check('IDENTIFIER') and not self.check('STANDARD_IDENTIFIER'):
+                self.error("Expected parameter name", self.current_token().line)
+                break
+            
+            param_name = self.current_token().value
+            self.advance()
+            
+            # Check for array parameter
+            array_size = None
+            if self.match('SYMBOL', '['):
+                self.consume('SYMBOL', ']', "Expected ']' after array parameter")
+                array_size = LiteralExpression("0", 'number', line)  # Array params don't have size
+            
+            params.append(VarDeclaration(param_type, param_name, array_size, line))
+            
+            # Continue if there are more parameters
+            if not self.match('SYMBOL', ','):
+                break
+        
+        return params
+    
+    def compound_statement(self) -> CompoundStatement:
+        """Parse compound statement: { local_declarations statement_list }"""
+        self.consume('SYMBOL', '{', "Expected '{' at start of compound statement")
+        line = self.current_token().line
+        
+        local_declarations = []
         statements = []
-        while self.current_token and self.current_token.value not in {'case', 'default', '}'}:
-            stmt = self.parse_statement()
+        
+        # Parse local variable declarations
+        while self.check('KEYWORD'):
+            # This might be a type specifier for a local variable
+            type_spec = self.current_token().value
+            var_line = self.current_token().line
+            self.advance()
+            
+            # Must be followed by an identifier
+            if not self.check('IDENTIFIER') and not self.check('STANDARD_IDENTIFIER'):
+                self.error("Expected identifier after type specifier", self.current_token().line)
+                self.synchronize()
+                continue
+            
+            var_name = self.current_token().value
+            self.advance()
+            
+            # Finish variable declaration
+            array_size = None
+            if self.match('SYMBOL', '['):
+                # Array declaration
+                if self.check('NUMBER'):
+                    array_size = LiteralExpression(self.current_token().value, 'number', self.current_token().line)
+                    self.advance()
+                
+                self.consume('SYMBOL', ']', "Expected ']' after array size")
+            
+            self.consume('SYMBOL', ';', "Expected ';' after local variable declaration")
+            local_declarations.append(VarDeclaration(type_spec, var_name, array_size, var_line))
+        
+        # Parse statements
+        while not self.check('SYMBOL', '}') and not self.is_at_end():
+            stmt = self.statement()
             if stmt:
                 statements.append(stmt)
+        
+        self.consume('SYMBOL', '}', "Expected '}' at end of compound statement")
+        
+        return CompoundStatement(local_declarations, statements, line)
+    
+    def statement(self) -> Statement:
+        """Parse a statement"""
+        if self.check('KEYWORD'):
+            keyword = self.current_token().value
+            if keyword == 'return':
+                self.advance()  # consume 'return'
+                line = self.current_token().line
                 
-        return CaseNode(value, statements, line)
-
-    def parse_break_statement(self):
-        """Parse a break statement."""
-        line = self.current_token.line
-        self.advance()  # Skip 'break'
+                # Handle return with no value
+                if self.check('SYMBOL', ';'):
+                    self.advance()  # consume semicolon
+                    return ReturnStatement(None, line)
+                
+                # Handle return with value
+                expr = None
+                if self.check('NUMBER'):
+                    value = self.current_token().value
+                    expr = LiteralExpression(value, 'number', line)
+                    self.advance()  # consume number
+                else:
+                    expr = self.expression()
+                    
+                self.consume('SYMBOL', ';', "Expected ';' after return value")
+                return ReturnStatement(expr, line)
+            elif keyword == 'if':
+                self.advance()
+                return self.if_statement()
+            elif keyword == 'while':
+                self.advance()
+                return self.while_statement()
+            elif keyword == 'do':
+                self.advance()
+                return self.do_while_statement()
+            elif keyword == 'for':
+                self.advance()
+                return self.for_statement()
+            elif keyword == 'switch':
+                self.advance()
+                return self.switch_statement()
+            elif keyword == 'break':
+                self.advance()
+                stmt = BreakStatement(self.current_token().line)
+                self.consume('SYMBOL', ';', "Expected ';' after 'break'")
+                return stmt
+            elif keyword == 'continue':
+                self.advance()
+                stmt = ContinueStatement(self.current_token().line)
+                self.consume('SYMBOL', ';', "Expected ';' after 'continue'")
+                return stmt
         
-        if not self.expect('SYMBOL', ';'):
-            return None
-            
-        return BreakNode(line)
-
-    def parse_continue_statement(self):
-        """Parse a continue statement."""
-        line = self.current_token.line
-        self.advance()  # Skip 'continue'
+        if self.check('SYMBOL', '{'):
+            return self.compound_statement()
         
-        if not self.expect('SYMBOL', ';'):
-            return None
-            
-        return ContinueNode(line)
-
-    def parse_return_statement(self):
-        """Parse a return statement."""
-        line = self.current_token.line
-        self.advance()  # Skip 'return'
-        
-        value = None
-        if self.current_token.value != ';':
-            value = self.parse_expression()
-            
-        if not self.expect('SYMBOL', ';'):
-            return None
-            
-        return ReturnNode(value, line)
-
-    def parse_expression(self):
-        """Parse an expression using operator precedence."""
-        return self.parse_assignment()
-
-    def parse_assignment(self):
-        """Parse an assignment expression."""
-        expr = self.parse_logical_or()
-        
-        if self.current_token and self.current_token.value in {'=', '+=', '-=', '*=', '/=', '%='}:
-            operator = self.current_token.value
-            line = self.current_token.line
-            self.advance()
-            
-            value = self.parse_assignment()
-            return AssignmentNode(expr, operator, value, line)
-            
+        # Handle expression statements
+        expr = self.expression_statement()
         return expr
-
-    def parse_logical_or(self):
-        """Parse logical OR expression."""
-        expr = self.parse_logical_and()
+    
+    # method to handle function calls in expressions:
+    def function_call(self) -> Expression:
+        """Parse function call: identifier '(' arguments? ')'"""
+        name = self.current_token().value
+        line = self.current_token().line
+        self.advance()  # consume function name
         
-        while self.current_token and self.current_token.value == '||':
-            operator = self.current_token.value
-            line = self.current_token.line
-            self.advance()
-            
-            right = self.parse_logical_and()
-            expr = BinaryOpNode(operator, expr, right, line)
-            
-        return expr
-
-    def parse_logical_and(self):
-        """Parse logical AND expression."""
-        expr = self.parse_equality()
+        self.consume('SYMBOL', '(', "Expected '(' after function name")
+        arguments = []
         
-        while self.current_token and self.current_token.value == '&&':
-            operator = self.current_token.value
-            line = self.current_token.line
-            self.advance()
-            
-            right = self.parse_equality()
-            expr = BinaryOpNode(operator, expr, right, line)
-            
-        return expr
-
-    def parse_equality(self):
-        """Parse equality expression."""
-        expr = self.parse_relational()
+        if not self.check('SYMBOL', ')'):
+            arguments.append(self.expression())
+            while self.match('SYMBOL', ','):
+                arguments.append(self.expression())
         
-        while self.current_token and self.current_token.value in {'==', '!='}:
-            operator = self.current_token.value
-            line = self.current_token.line
-            self.advance()
-            
-            right = self.parse_relational()
-            expr = BinaryOpNode(operator, expr, right, line)
-            
-        return expr
-
-    def parse_relational(self):
-        """Parse relational expression."""
-        expr = self.parse_additive()
+        self.consume('SYMBOL', ')', "Expected ')' after arguments")
         
-        while self.current_token and self.current_token.value in {'<', '>', '<=', '>='}:
-            operator = self.current_token.value
-            line = self.current_token.line
-            self.advance()
-            
-            right = self.parse_additive()
-            expr = BinaryOpNode(operator, expr, right, line)
-            
-        return expr
+        return FunctionCallExpression(IdentifierExpression(name, line), arguments, line)
 
-    def parse_additive(self):
-        """Parse additive expression."""
-        expr = self.parse_multiplicative()
+
+    
+    def if_statement(self) -> IfStatement:
+        """Parse if statement: if (expression) statement [else statement]"""
+        line = self.current_token().line - 1  # Line of 'if' keyword
         
-        while self.current_token and self.current_token.value in {'+', '-'}:
-            operator = self.current_token.value
-            line = self.current_token.line
-            self.advance()
-            
-            right = self.parse_multiplicative()
-            expr = BinaryOpNode(operator, expr, right, line)
-            
-        return expr
-
-    def parse_multiplicative(self):
-        """Parse multiplicative expression."""
-        expr = self.parse_unary()
+        self.consume('SYMBOL', '(', "Expected '(' after 'if'")
+        condition = self.expression()
+        self.consume('SYMBOL', ')', "Expected ')' after if condition")
         
-        while self.current_token and self.current_token.value in {'*', '/', '%'}:
-            operator = self.current_token.value
-            line = self.current_token.line
-            self.advance()
-            
-            right = self.parse_unary()
-            expr = BinaryOpNode(operator, expr, right, line)
-            
-        return expr
-
-    def parse_unary(self):
-        """Parse unary expression."""
-        if self.current_token and self.current_token.value in {'!', '-', '++', '--'}:
-            operator = self.current_token.value
-            line = self.current_token.line
-            self.advance()
-            
-            operand = self.parse_unary()
-            return UnaryOpNode(operator, operand, True, line)
-            
-        return self.parse_postfix()
-
-    def parse_postfix(self):
-        """Parse postfix expression."""
-        expr = self.parse_primary()
+        if_body = self.statement()
+        else_body = None
         
-        while self.current_token and self.current_token.value in {'++', '--'}:
-            operator = self.current_token.value
-            line = self.current_token.line
+        if self.match('KEYWORD', 'else'):
+            else_body = self.statement()
+        
+        return IfStatement(condition, if_body, else_body, line)
+    
+    def while_statement(self) -> WhileStatement:
+        """Parse while statement: while (expression) statement"""
+        line = self.current_token().line - 1  # Line of 'while' keyword
+        
+        self.consume('SYMBOL', '(', "Expected '(' after 'while'")
+        condition = self.expression()
+        self.consume('SYMBOL', ')', "Expected ')' after while condition")
+        
+        body = self.statement()
+        
+        return WhileStatement(condition, body, line)
+    
+    def do_while_statement(self) -> DoWhileStatement:
+        """Parse do-while statement: do statement while (expression);"""
+        line = self.current_token().line - 1  # Line of 'do' keyword
+        
+        body = self.statement()
+        
+        self.consume('KEYWORD', 'while', "Expected 'while' after 'do' block")
+        self.consume('SYMBOL', '(', "Expected '(' after 'while'")
+        condition = self.expression()
+        self.consume('SYMBOL', ')', "Expected ')' after do-while condition")
+        self.consume('SYMBOL', ';', "Expected ';' after do-while statement")
+        
+        return DoWhileStatement(body, condition, line)
+    
+    def for_statement(self) -> ForStatement:
+        """Parse for statement: for (init; condition; update) statement"""
+        line = self.current_token().line - 1  # Line of 'for' keyword
+        
+        self.consume('SYMBOL', '(', "Expected '(' after 'for'")
+        
+        # Initialize clause
+        init = None
+        if not self.check('SYMBOL', ';'):
+            init = self.expression()
+        self.consume('SYMBOL', ';', "Expected ';' after for-loop initialization")
+        
+        # Condition clause
+        condition = None
+        if not self.check('SYMBOL', ';'):
+            condition = self.expression()
+        self.consume('SYMBOL', ';', "Expected ';' after for-loop condition")
+        
+        # Update clause
+        update = None
+        if not self.check('SYMBOL', ')'):
+            update = self.expression()
+        self.consume('SYMBOL', ')', "Expected ')' after for-loop clauses")
+        
+        # Body
+        body = self.statement()
+        
+        return ForStatement(init, condition, update, body, line)
+    
+    def switch_statement(self) -> SwitchStatement:
+        """Parse switch statement: switch (expression) { case_stmt* default_stmt? }"""
+        line = self.current_token().line - 1  # Line of 'switch' keyword
+        
+        self.consume('SYMBOL', '(', "Expected '(' after 'switch'")
+        expression = self.expression()
+        self.consume('SYMBOL', ')', "Expected ')' after switch expression")
+        
+        self.consume('SYMBOL', '{', "Expected '{' after switch")
+        
+        cases = []
+        default_case = None
+        
+        while not self.check('SYMBOL', '}') and not self.is_at_end():
+            if self.match('KEYWORD', 'case'):
+                case_line = self.current_token().line - 1
+                value = self.expression()
+                self.consume('SYMBOL', ':', "Expected ':' after case value")
+                
+                statements = []
+                while not self.check('KEYWORD', 'case') and not self.check('KEYWORD', 'default') and \
+                      not self.check('SYMBOL', '}') and not self.is_at_end():
+                    statements.append(self.statement())
+                
+                cases.append(CaseStatement(value, statements, case_line))
+            
+            elif self.match('KEYWORD', 'default'):
+                default_line = self.current_token().line - 1
+                self.consume('SYMBOL', ':', "Expected ':' after 'default'")
+                
+                statements = []
+                while not self.check('KEYWORD', 'case') and not self.check('KEYWORD', 'default') and \
+                      not self.check('SYMBOL', '}') and not self.is_at_end():
+                    statements.append(self.statement())
+                
+                default_case = DefaultStatement(statements, default_line)
+            
+            else:
+                self.error("Expected 'case' or 'default' in switch statement", self.current_token().line)
+                self.synchronize()
+        
+        self.consume('SYMBOL', '}', "Expected '}' after switch statement")
+        
+        return SwitchStatement(expression, cases, default_case, line)
+
+    def expression_statement(self) -> ExpressionStatement:
+        """Parse an expression statement"""
+        line = self.current_token().line
+        
+        # Handle empty statements (just a semicolon)
+        if self.check('SYMBOL', ';'):
+            self.advance()
+            return ExpressionStatement(None, line)
+        
+        # Parse the expression
+        expr = self.expression()
+        self.consume('SYMBOL', ';', "Expected ';' after expression")
+        return ExpressionStatement(expr, line)
+
+    
+    def expression(self) -> Expression:
+        """Parse an expression"""
+        if self.check('NUMBER'):
+            value = self.current_token().value
+            line = self.current_token().line
+            self.advance()
+            return LiteralExpression(value, 'number', line)
+        elif self.check('IDENTIFIER') or self.check('STANDARD_IDENTIFIER'):
+            return self.assignment()
+        elif self.check('SYMBOL', '('):
+            self.advance()  # consume '('
+            expr = self.expression()
+            self.consume('SYMBOL', ')', "Expected ')' after expression")
+            return expr
+        else:
+            return self.assignment()
+    
+    def assignment(self) -> Expression:
+        """Parse assignment: logical_or (assignment_op assignment)?"""
+        expr = self.logical_or()
+        
+        # Check if this is an assignment
+        if self.check('OPERATOR', '=') or self.check('OPERATOR', '+=') or \
+           self.check('OPERATOR', '-=') or self.check('OPERATOR', '*=') or \
+           self.check('OPERATOR', '/=') or self.check('OPERATOR', '%='):
+            
+            # Make sure left side is a valid target
+            if not isinstance(expr, (IdentifierExpression, ArrayAccessExpression)):
+                self.error("Invalid assignment target", self.current_token().line)
+            
+            operator = self.current_token().value
+            line = self.current_token().line
             self.advance()
             
-            expr = UnaryOpNode(operator, expr, False, line)
+            right = self.assignment()  # Right-associative
             
+            return AssignmentExpression(expr, operator, right, line)
+        
         return expr
-
-    def parse_primary(self):
-        """Parse primary expression."""
-        if not self.current_token:
-            self.error("Unexpected end of input")
-            return None
-
-        token = self.current_token
-        if token.type == 'NUMBER':
-            self.advance()
-            return LiteralNode(token.value, 'number', token.line)
+    
+    def logical_or(self) -> Expression:
+        """Parse logical OR: logical_and ('||' logical_and)*"""
+        expr = self.logical_and()
+        
+        while self.match('OPERATOR', '||'):
+            line = self.current_token().line - 1
+            right = self.logical_and()
+            expr = BinaryExpression(expr, '||', right, line)
+        
+        return expr
+    
+    def logical_and(self) -> Expression:
+        """Parse logical AND: equality ('&&' equality)*"""
+        expr = self.equality()
+        
+        while self.match('OPERATOR', '&&'):
+            line = self.current_token().line - 1
+            right = self.equality()
+            expr = BinaryExpression(expr, '&&', right, line)
+        
+        return expr
+    
+    def equality(self) -> Expression:
+        """Parse equality: relational ('==' | '!=' relational)*"""
+        expr = self.relational()
+        
+        while self.match('OPERATOR', '==') or self.match('OPERATOR', '!='):
+            operator = self.tokens[self.current - 1].value
+            line = self.tokens[self.current - 1].line
+            right = self.relational()
+            expr = BinaryExpression(expr, operator, right, line)
+        
+        return expr
+    
+    def relational(self) -> Expression:
+        """Parse relational: additive ('<' | '<=' | '>' | '>=' additive)*"""
+        expr = self.additive()
+        
+        while self.match('OPERATOR', '<') or self.match('OPERATOR', '<=') or \
+              self.match('OPERATOR', '>') or self.match('OPERATOR', '>='):
+            operator = self.tokens[self.current - 1].value
+            line = self.tokens[self.current - 1].line
+            right = self.additive()
+            expr = BinaryExpression(expr, operator, right, line)
+        
+        return expr
+    
+    def additive(self) -> Expression:
+        """Parse additive: multiplicative ('+' | '-' multiplicative)*"""
+        expr = self.multiplicative()
+        
+        while self.match('OPERATOR', '+') or self.match('OPERATOR', '-'):
+            operator = self.tokens[self.current - 1].value
+            line = self.tokens[self.current - 1].line
+            right = self.multiplicative()
+            expr = BinaryExpression(expr, operator, right, line)
+        
+        return expr
+    
+    def multiplicative(self) -> Expression:
+        """Parse multiplicative: unary ('*' | '/' | '%' unary)*"""
+        expr = self.unary()
+        
+        while self.match('OPERATOR', '*') or self.match('OPERATOR', '/') or self.match('OPERATOR', '%'):
+            operator = self.tokens[self.current - 1].value
+            line = self.tokens[self.current - 1].line
+            right = self.unary()
+            expr = BinaryExpression(expr, operator, right, line)
+        
+        return expr
+    
+    def unary(self) -> Expression:
+        """Parse unary: ('!' | '-' | '+' | '++' | '--') unary | postfix"""
+        if self.match('OPERATOR', '!') or self.match('OPERATOR', '-') or \
+           self.match('OPERATOR', '+') or self.match('OPERATOR', '++') or \
+           self.match('OPERATOR', '--'):
+            operator = self.tokens[self.current - 1].value
+            line = self.tokens[self.current - 1].line
+            right = self.unary()
+            return UnaryExpression(operator, right, line)
+        
+        return self.postfix()
+    
+    def postfix(self) -> Expression:
+        """Parse postfix: primary ('++' | '--' | '[' expression ']' | '(' arguments ')')*"""
+        expr = self.primary()
+        
+        while True:
+            if self.match('OPERATOR', '++') or self.match('OPERATOR', '--'):
+                operator = self.tokens[self.current - 1].value
+                line = self.tokens[self.current - 1].line
+                expr = UnaryExpression(operator + '_post', expr, line)  # Mark as postfix
             
-        elif token.type == 'STRING':
-            self.advance()
-            return LiteralNode(token.value, 'string', token.line)
+            elif self.match('SYMBOL', '['):
+                line = self.current_token().line - 1
+                index = self.expression()
+                self.consume('SYMBOL', ']', "Expected ']' after array index")
+                expr = ArrayAccessExpression(expr, index, line)
             
-        elif token.type == 'CHAR_LITERAL':
-            self.advance()
-            return LiteralNode(token.value, 'char', token.line)
-            
-        elif token.type == 'IDENTIFIER':
-            self.advance()
-            # Check if it's a function call
-            if self.current_token and self.current_token.value == '(':
-                self.advance()  # consume '('
+            elif self.match('SYMBOL', '('):
+                line = self.current_token().line - 1
                 arguments = []
                 
-                if self.current_token.value != ')':
-                    while True:
-                        arg = self.parse_expression()
-                        if arg:
-                            arguments.append(arg)
-                            
-                        if self.current_token.value == ')':
-                            break
-                            
-                        if not self.expect('SYMBOL', ','):
-                            return None
-                            
-                if not self.expect('SYMBOL', ')'):
-                    self.error("Expected closing parenthesis")
-                    return None
+                # Parse arguments if any
+                if not self.check('SYMBOL', ')'):
+                    arguments.append(self.expression())
                     
-                return FunctionCallNode(token.value, arguments, token.line)
+                    while self.match('SYMBOL', ','):
+                        arguments.append(self.expression())
+                
+                self.consume('SYMBOL', ')', "Expected ')' after function arguments")
+                expr = FunctionCallExpression(expr, arguments, line)
+            
             else:
-                return IdentifierNode(token.value, token.line)
-                
-        elif token.value == '(':
-            self.advance()  # consume '('
-            expr = self.parse_expression()
-            
-            if not self.expect('SYMBOL', ')'):
-                self.error("Expected closing parenthesis")
-                return None
-                
+                break
+        
+        return expr
+
+# for Expression
+    def primary(self) -> Expression:
+        # Parse primary: NUMBER | STRING | CHAR | IDENTIFIER | FUNCTION_CALL | '(' expression ')'
+        if self.match('NUMBER'):
+            return LiteralExpression(self.tokens[self.current - 1].value, 'number', 
+                                self.tokens[self.current - 1].line)
+        
+        elif self.match('STRING'):
+            return LiteralExpression(self.tokens[self.current - 1].value, 'string', 
+                                self.tokens[self.current - 1].line)
+        
+        elif self.match('CHAR_LITERAL'):
+            return LiteralExpression(self.tokens[self.current - 1].value, 'char', 
+                                self.tokens[self.current - 1].line)
+        
+        elif self.check('FUNCTION_CALL'):
+            return self.function_call()
+        
+        elif self.match('IDENTIFIER') or self.match('STANDARD_IDENTIFIER'):
+            return IdentifierExpression(self.tokens[self.current - 1].value, 
+                                    self.tokens[self.current - 1].line)
+        
+        elif self.match('SYMBOL', '('):
+            expr = self.expression()
+            self.consume('SYMBOL', ')', "Expected ')' after expression")
             return expr
-            
-        self.error(f"Unexpected token: {token.value}")
-        self.advance()
+        
+        self.error("Expected expression", self.current_token().line if self.current_token() else -1)
         return None
 
-def pretty_print_ast(node, indent=""):
-    """Helper function to print the AST in a readable format."""
-    if not node:
-        return indent + "None"
 
-    if isinstance(node, ProgramNode):
-        result = indent + "Program:\n"
-        for decl in node.declarations:
-            result += pretty_print_ast(decl, indent + "  ")
-        return result
+# AST Printer
 
-    elif isinstance(node, FunctionNode):
-        result = f"{indent}Function {node.name} (returns {node.return_type}):\n"
-        result += indent + "  Parameters:\n"
-        for param in node.parameters:
-            result += pretty_print_ast(param, indent + "    ")
-        result += indent + "  Body:\n"
-        result += pretty_print_ast(node.body, indent + "    ")
-        return result
+# Add this class after all the existing code in parser.py
 
-    elif isinstance(node, ParameterNode):
-        return f"{indent}{node.type_name} {node.name}\n"
-
-    elif isinstance(node, DeclarationNode):
-        init = f" = {pretty_print_ast(node.init_value, '')}" if node.init_value else ""
-        return f"{indent}Declaration: {node.type_name} {node.name}{init}\n"
-
-    elif isinstance(node, BlockNode):
-        result = indent + "Block:\n"
-        for stmt in node.statements:
-            result += pretty_print_ast(stmt, indent + "  ")
-        return result
-
-    elif isinstance(node, IfNode):
-        result = indent + "If:\n"
-        result += indent + "  Condition:\n"
-        result += pretty_print_ast(node.condition, indent + "    ")
-        result += indent + "  Then:\n"
-        result += pretty_print_ast(node.true_body, indent + "    ")
-        if node.false_body:
-            result += indent + "  Else:\n"
-            result += pretty_print_ast(node.false_body, indent + "    ")
-        return result
-
-    elif isinstance(node, BinaryOpNode):
-        return f"{indent}({pretty_print_ast(node.left, '')} {node.operator} {pretty_print_ast(node.right, '')})\n"
-
-    elif isinstance(node, UnaryOpNode):
-        if node.is_prefix:
-            return f"{indent}{node.operator}{pretty_print_ast(node.operand, '')}\n"
-        else:
-            return f"{indent}{pretty_print_ast(node.operand, '')}{node.operator}\n"
-
-    elif isinstance(node, AssignmentNode):
-        return f"{indent}Assignment: {pretty_print_ast(node.target, '')} {node.operator} {pretty_print_ast(node.value, '')}\n"
-
-    elif isinstance(node, FunctionCallNode):
-        args = ", ".join(pretty_print_ast(arg, "").strip() for arg in node.arguments)
-        return f"{indent}Call: {node.name}({args})\n"
-
-    elif isinstance(node, IdentifierNode):
-        return node.name
-
-    elif isinstance(node, LiteralNode):
-        return str(node.value)
-
-    elif isinstance(node, ReturnNode):
-        if node.value:
-            return f"{indent}Return: {pretty_print_ast(node.value, '')}\n"
-        return f"{indent}Return\n"
-
-    return f"{indent}{str(node)}\n"
-
-def main():
-        print("Enter C code (press Enter twice to finish input):")
-        user_input = ''
-        while True:
-            line = input()
-            if line == '':
-                break
-            user_input += line + '\n'
-
-        # Create lexer
-        lexer = Lexical(user_input)
+class ASTPrinter:
+    def __init__(self):
+        self.indent = 0
+    
+    def print_ast(self, node, indent=0) -> str:
+        if node is None:
+            return "None"
         
-        # Create parser with lexer object
-        parser = Parser(lexer)
+        result = "  " * indent + str(node) + "\n"
         
-        # Parse the program
-        ast = parser.parse_program()
-
-        # Display errors if any
-        if parser.errors:
-            print("\nParsing Errors:")
-            print("-" * 70)
-            for error in parser.errors:
-                print(f"  {error}")
-        else:
-            # Print AST
-            print("\nAbstract Syntax Tree:")
-            print("-" * 70)
-            print(pretty_print_ast(ast))
-
-if __name__ == "__main__":
-    main()
+        if isinstance(node, Program):
+            for decl in node.declarations:
+                result += self.print_ast(decl, indent + 1)
+        
+        elif isinstance(node, FunctionDeclaration):
+            for param in node.params:
+                result += self.print_ast(param, indent + 1)
+            if node.body:
+                result += self.print_ast(node.body, indent + 1)
+        
+        elif isinstance(node, CompoundStatement):
+            for decl in node.local_declarations:
+                result += self.print_ast(decl, indent + 1)
+            for stmt in node.statements:
+                result += self.print_ast(stmt, indent + 1)
+        
+        elif isinstance(node, IfStatement):
+            result += self.print_ast(node.condition, indent + 1)
+            result += self.print_ast(node.if_body, indent + 1)
+            if node.else_body:
+                result += self.print_ast(node.else_body, indent + 1)
+        
+        elif isinstance(node, WhileStatement):
+            result += self.print_ast(node.condition, indent + 1)
+            result += self.print_ast(node.body, indent + 1)
+        
+        elif isinstance(node, DoWhileStatement):
+            result += self.print_ast(node.body, indent + 1)
+            result += self.print_ast(node.condition, indent + 1)
+        
+        elif isinstance(node, ForStatement):
+            if node.init:
+                result += self.print_ast(node.init, indent + 1)
+            if node.condition:
+                result += self.print_ast(node.condition, indent + 1)
+            if node.update:
+                result += self.print_ast(node.update, indent + 1)
+            result += self.print_ast(node.body, indent + 1)
+        
+        elif isinstance(node, SwitchStatement):
+            result += self.print_ast(node.expression, indent + 1)
+            for case in node.cases:
+                result += self.print_ast(case, indent + 1)
+            if node.default_case:
+                result += self.print_ast(node.default_case, indent + 1)
+        
+        elif isinstance(node, CaseStatement):
+            result += self.print_ast(node.value, indent + 1)
+            for stmt in node.statements:
+                result += self.print_ast(stmt, indent + 1)
+        
+        elif isinstance(node, DefaultStatement):
+            for stmt in node.statements:
+                result += self.print_ast(stmt, indent + 1)
+        
+        elif isinstance(node, ReturnStatement):
+            if node.expression:
+                result += self.print_ast(node.expression, indent + 1)
+        
+        elif isinstance(node, ExpressionStatement):
+            if node.expression:
+                result += self.print_ast(node.expression, indent + 1)
+        
+        elif isinstance(node, BinaryExpression):
+            result += self.print_ast(node.left, indent + 1)
+            result += self.print_ast(node.right, indent + 1)
+        
+        elif isinstance(node, UnaryExpression):
+            result += self.print_ast(node.operand, indent + 1)
+        
+        elif isinstance(node, AssignmentExpression):
+            result += self.print_ast(node.left, indent + 1)
+            result += self.print_ast(node.right, indent + 1)
+        
+        elif isinstance(node, FunctionCallExpression):
+            result += self.print_ast(node.function, indent + 1)
+            for arg in node.arguments:
+                result += self.print_ast(arg, indent + 1)
+        
+        elif isinstance(node, ArrayAccessExpression):
+            result += self.print_ast(node.array, indent + 1)
+            result += self.print_ast(node.index, indent + 1)
+        
+        return result
+    
+    #awkebfesHLf

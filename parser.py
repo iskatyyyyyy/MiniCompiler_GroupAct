@@ -21,15 +21,18 @@ class Declaration(ASTNode):
     pass
 
 class VarDeclaration(Declaration):
-    def __init__(self, type_spec: str, var_name: str, array_size: Optional[ASTNode] = None, line: int = 0):
+    def __init__(self, type_spec: str, var_name: str, initializer: Optional[ASTNode] = None, array_size: Optional[ASTNode] = None, line: int = 0):
         super().__init__(line)
         self.type_spec = type_spec
         self.var_name = var_name
+        self.initializer = initializer  # Added initializer
         self.array_size = array_size
-    
+
     def __repr__(self):
         array_suffix = f"[{self.array_size}]" if self.array_size else ""
-        return f"VarDeclaration({self.type_spec} {self.var_name}{array_suffix})"
+        init_suffix = f" = {self.initializer}" if self.initializer else ""  # Include initializer in repr
+        return f"VarDeclaration({self.type_spec} {self.var_name}{array_suffix}{init_suffix})"
+
 
 class FunctionDeclaration(Declaration):
     def __init__(self, return_type: str, name: str, params: List[VarDeclaration], 
@@ -359,6 +362,19 @@ class Parser:
             # Variable declaration
             return self.finish_var_declaration(type_spec, identifier, line)
     
+    def variable_declaration(self):
+        type_token = self.consume('KEYWORD', message="Expected type specifier")
+        type_spec = type_token.value
+        identifier_token = self.consume('IDENTIFIER', message="Expected identifier after type specifier")
+        line = identifier_token.line
+
+        initializer = None
+        if self.match('SYMBOL', '='):
+            initializer = self.expression()  # Parse initializer expression
+
+        self.consume('SYMBOL', ';', "Expected ';' after local variable declaration")
+        return VarDeclaration(type_spec, identifier_token.value, initializer, line)
+
     def finish_var_declaration(self, type_spec: str, var_name: str, line: int) -> VarDeclaration:
         """Finish parsing a variable declaration"""
         array_size = None
@@ -405,6 +421,18 @@ class Parser:
             self.synchronize()
             return FunctionDeclaration(return_type, name, params, None, line)  # Return what we have so far
     
+    def match_type_specifier(self):
+        return self.match('KEYWORD', 'int') or \
+            self.match('KEYWORD', 'float') or \
+            self.match('KEYWORD', 'char') or \
+            self.match('KEYWORD', 'void')
+    
+    def consume_type_specifier(self):
+        if self.check('KEYWORD', 'int') or self.check('KEYWORD', 'float') or self.check('KEYWORD', 'char') or self.check('KEYWORD', 'void'):
+            return self.advance().value
+        else:
+            raise self.error(self.current_token(), "Expected type specifier")
+
     def parameter_list(self) -> List[VarDeclaration]:
         """Parse function parameters: param_list -> param (',' param)*"""
         params = []
@@ -451,34 +479,39 @@ class Parser:
         
         # Parse local variable declarations
         while self.check('KEYWORD'):
-            # This might be a type specifier for a local variable
+            # This should be a type specifier for a local variable
             type_spec = self.current_token().value
             var_line = self.current_token().line
-            self.advance()
+            self.advance()  # consume the type specifier
             
-            # Must be followed by an identifier
+            # Must be followed by an identifier (the variable name)
             if not self.check('IDENTIFIER') and not self.check('STANDARD_IDENTIFIER'):
                 self.error("Expected identifier after type specifier", self.current_token().line)
                 self.synchronize()
                 continue
             
             var_name = self.current_token().value
-            self.advance()
+            self.advance()  # consume the variable name
             
-            # Finish variable declaration
+            # Handle array size if applicable
             array_size = None
             if self.match('SYMBOL', '['):
-                # Array declaration
                 if self.check('NUMBER'):
                     array_size = LiteralExpression(self.current_token().value, 'number', self.current_token().line)
                     self.advance()
-                
                 self.consume('SYMBOL', ']', "Expected ']' after array size")
             
+            # Check if there's an initializer (e.g., "int a = 5;")
+            initializer = None
+            if self.match('SYMBOL', '='):
+                initializer = self.expression()  # Parse the initializer expression
+            
             self.consume('SYMBOL', ';', "Expected ';' after local variable declaration")
-            local_declarations.append(VarDeclaration(type_spec, var_name, array_size, var_line))
+
+            # Add the local variable declaration to the list
+            local_declarations.append(VarDeclaration(type_spec, var_name, initializer, array_size, var_line))
         
-        # Parse statements
+        # Parse statements (normal statements after declarations)
         while not self.check('SYMBOL', '}') and not self.is_at_end():
             stmt = self.statement()
             if stmt:
@@ -487,7 +520,9 @@ class Parser:
         self.consume('SYMBOL', '}', "Expected '}' at end of compound statement")
         
         return CompoundStatement(local_declarations, statements, line)
-    
+
+
+
     def statement(self) -> Statement:
         """Parse a statement"""
         if self.check('KEYWORD'):
@@ -696,24 +731,61 @@ class Parser:
         self.consume('SYMBOL', ';', "Expected ';' after expression")
         return ExpressionStatement(expr, line)
 
+    def parse_binary_expression(self, parse_operand_func, operators):
+        expr = parse_operand_func()
+        while self.check('SYMBOL') and self.current_token().value in operators:
+            op = self.current_token().value
+            line = self.current_token().line
+            self.advance()
+            right = parse_operand_func()
+            expr = BinaryExpression(expr, op, right, line)
+        return expr
     
     def expression(self) -> Expression:
-        """Parse an expression"""
+        """Parse an expression with binary operator support"""
+        return self.parse_binary_expression(self.term, ['+', '-', '*', '/'])  # You can extend operators here
+    
+    def term(self) -> Expression:
         if self.check('NUMBER'):
             value = self.current_token().value
             line = self.current_token().line
             self.advance()
             return LiteralExpression(value, 'number', line)
+
+        elif self.check('STRING'):
+            value = self.current_token().value
+            line = self.current_token().line
+            self.advance()
+            return LiteralExpression(value, 'string', line)
+
         elif self.check('IDENTIFIER') or self.check('STANDARD_IDENTIFIER'):
-            return self.assignment()
+            name_token = self.current_token()
+            name = name_token.value
+            line = name_token.line
+            self.advance()
+
+            # Function call: IDENTIFIER '(' ...
+            if self.check('SYMBOL', '('):
+                self.advance()
+                arguments = []
+                if not self.check('SYMBOL', ')'):
+                    arguments.append(self.expression())
+                    while self.match('SYMBOL', ','):
+                        arguments.append(self.expression())
+                self.consume('SYMBOL', ')', "Expected ')' after arguments")
+                return FunctionCallExpression(IdentifierExpression(name, line), arguments, line)
+            else:
+                return IdentifierExpression(name, line)
+
         elif self.check('SYMBOL', '('):
-            self.advance()  # consume '('
+            self.advance()
             expr = self.expression()
             self.consume('SYMBOL', ')', "Expected ')' after expression")
             return expr
+
         else:
-            return self.assignment()
-    
+            raise self.error(self.current_token(), "Unexpected token in expression")
+
     def assignment(self) -> Expression:
         """Parse assignment: logical_or (assignment_op assignment)?"""
         expr = self.logical_or()
@@ -885,7 +957,6 @@ class Parser:
         self.error("Expected expression", self.current_token().line if self.current_token() else -1)
         return None
 
-
 # AST Printer
 
 # Add this class after all the existing code in parser.py
@@ -893,96 +964,108 @@ class Parser:
 class ASTPrinter:
     def __init__(self):
         self.indent = 0
-    
+
     def print_ast(self, node, indent=0) -> str:
-        if node is None:
-            return "None"
-        
-        result = "  " * indent + str(node) + "\n"
-        
-        if isinstance(node, Program):
-            for decl in node.declarations:
-                result += self.print_ast(decl, indent + 1)
-        
-        elif isinstance(node, FunctionDeclaration):
-            for param in node.params:
-                result += self.print_ast(param, indent + 1)
-            if node.body:
-                result += self.print_ast(node.body, indent + 1)
-        
-        elif isinstance(node, CompoundStatement):
-            for decl in node.local_declarations:
-                result += self.print_ast(decl, indent + 1)
-            for stmt in node.statements:
-                result += self.print_ast(stmt, indent + 1)
-        
-        elif isinstance(node, IfStatement):
-            result += self.print_ast(node.condition, indent + 1)
-            result += self.print_ast(node.if_body, indent + 1)
-            if node.else_body:
-                result += self.print_ast(node.else_body, indent + 1)
-        
-        elif isinstance(node, WhileStatement):
-            result += self.print_ast(node.condition, indent + 1)
-            result += self.print_ast(node.body, indent + 1)
-        
-        elif isinstance(node, DoWhileStatement):
-            result += self.print_ast(node.body, indent + 1)
-            result += self.print_ast(node.condition, indent + 1)
-        
-        elif isinstance(node, ForStatement):
-            if node.init:
-                result += self.print_ast(node.init, indent + 1)
-            if node.condition:
-                result += self.print_ast(node.condition, indent + 1)
-            if node.update:
-                result += self.print_ast(node.update, indent + 1)
-            result += self.print_ast(node.body, indent + 1)
-        
-        elif isinstance(node, SwitchStatement):
-            result += self.print_ast(node.expression, indent + 1)
-            for case in node.cases:
-                result += self.print_ast(case, indent + 1)
-            if node.default_case:
-                result += self.print_ast(node.default_case, indent + 1)
-        
-        elif isinstance(node, CaseStatement):
-            result += self.print_ast(node.value, indent + 1)
-            for stmt in node.statements:
-                result += self.print_ast(stmt, indent + 1)
-        
-        elif isinstance(node, DefaultStatement):
-            for stmt in node.statements:
-                result += self.print_ast(stmt, indent + 1)
-        
-        elif isinstance(node, ReturnStatement):
-            if node.expression:
-                result += self.print_ast(node.expression, indent + 1)
-        
-        elif isinstance(node, ExpressionStatement):
-            if node.expression:
-                result += self.print_ast(node.expression, indent + 1)
-        
-        elif isinstance(node, BinaryExpression):
-            result += self.print_ast(node.left, indent + 1)
-            result += self.print_ast(node.right, indent + 1)
-        
-        elif isinstance(node, UnaryExpression):
-            result += self.print_ast(node.operand, indent + 1)
-        
-        elif isinstance(node, AssignmentExpression):
-            result += self.print_ast(node.left, indent + 1)
-            result += self.print_ast(node.right, indent + 1)
-        
-        elif isinstance(node, FunctionCallExpression):
-            result += self.print_ast(node.function, indent + 1)
-            for arg in node.arguments:
-                result += self.print_ast(arg, indent + 1)
-        
-        elif isinstance(node, ArrayAccessExpression):
-            result += self.print_ast(node.array, indent + 1)
-            result += self.print_ast(node.index, indent + 1)
-        
-        return result
-    
-    #awkebfesHLf
+        lines = []
+
+        def _print(node, indent):
+            if node is None:
+                lines.append("  " * indent + "None")
+                return
+
+            lines.append("  " * indent + str(node))
+
+            if isinstance(node, Program):
+                for decl in node.declarations:
+                    _print(decl, indent + 1)
+
+            elif isinstance(node, FunctionDeclaration):
+                for param in node.params:
+                    _print(param, indent + 1)
+                if node.body:
+                    _print(node.body, indent + 1)
+
+            elif isinstance(node, CompoundStatement):
+                for decl in node.local_declarations:
+                    _print(decl, indent + 1)
+                for stmt in node.statements:
+                    _print(stmt, indent + 1)
+
+            elif isinstance(node, IfStatement):
+                _print(node.condition, indent + 1)
+                _print(node.if_body, indent + 1)
+                if node.else_body:
+                    _print(node.else_body, indent + 1)
+
+            elif isinstance(node, WhileStatement):
+                _print(node.condition, indent + 1)
+                _print(node.body, indent + 1)
+
+            elif isinstance(node, DoWhileStatement):
+                _print(node.body, indent + 1)
+                _print(node.condition, indent + 1)
+
+            elif isinstance(node, ForStatement):
+                if node.init:
+                    _print(node.init, indent + 1)
+                if node.condition:
+                    _print(node.condition, indent + 1)
+                if node.update:
+                    _print(node.update, indent + 1)
+                _print(node.body, indent + 1)
+
+            elif isinstance(node, SwitchStatement):
+                _print(node.expression, indent + 1)
+                for case in node.cases:
+                    _print(case, indent + 1)
+                if node.default_case:
+                    _print(node.default_case, indent + 1)
+
+            elif isinstance(node, CaseStatement):
+                _print(node.value, indent + 1)
+                for stmt in node.statements:
+                    _print(stmt, indent + 1)
+
+            elif isinstance(node, DefaultStatement):
+                for stmt in node.statements:
+                    _print(stmt, indent + 1)
+
+            elif isinstance(node, ReturnStatement):
+                if node.expression:
+                    _print(node.expression, indent + 1)
+
+            elif isinstance(node, ExpressionStatement):
+                if node.expression:
+                    _print(node.expression, indent + 1)
+
+            elif isinstance(node, BinaryExpression):
+                _print(node.left, indent + 1)
+                _print(node.right, indent + 1)
+
+            elif isinstance(node, UnaryExpression):
+                _print(node.operand, indent + 1)
+
+            elif isinstance(node, AssignmentExpression):
+                _print(node.left, indent + 1)
+                _print(node.right, indent + 1)
+
+            elif isinstance(node, FunctionCallExpression):
+                _print(node.function, indent + 1)
+                for arg in node.arguments:
+                    _print(arg, indent + 1)
+
+            elif isinstance(node, ArrayAccessExpression):
+                _print(node.array, indent + 1)
+                _print(node.index, indent + 1)
+
+            elif isinstance(node, VarDeclaration):
+                result += "  " * indent + f"VarDeclaration: {node.type_spec} {node.var_name}"
+                if node.array_size:
+                    result += f"[{node.array_size}]"
+                if node.initializer:
+                    result += f" = {self.print_ast(node.initializer, indent + 1)}"  # Print the initializer
+                result += "\n"
+
+        _print(node, indent)
+        return "\n".join(lines)
+

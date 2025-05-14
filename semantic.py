@@ -1,187 +1,310 @@
-class Semantic: 
-    
-    def __init__(self):  # Constructor 
-        self.errors = False 
-        self.struct_definitions = set()  
-        self.declared_variables = {}  
 
-    def analyze_code(self, lines): 
-        self.errors = False  
-        self.struct_definitions.clear()  
-        self.declared_variables.clear()  
+import re
 
-        for i, line in enumerate(lines): 
+# Import token types and lexical analyzer 
+from lexical import Tokens, Lexical
+
+# Import (AST) node classes
+from ast_nodes import (
+    ASTNode, ProgramNode, DeclarationNode, FunctionNode, ParameterNode,
+    BlockNode, IfNode, WhileNode, DoWhileNode, ForNode, SwitchNode, CaseNode,
+    BreakNode, ContinueNode, ReturnNode, BinaryOpNode, UnaryOpNode, AssignmentNode,
+    IdentifierNode, LiteralNode, FunctionCallNode
+)
+
+class Semantic:
+
+    # Static method to analyze code line by line
+    @staticmethod
+    def analyze_code(lines):
+        errors = []                     
+        struct_definitions = set()      # Track defined struct names
+        declared_variables = {}         
+        user_defined_types = set()      # Set to store any custom user-defined types
+
+        # Define a set of known standard library functions
+        known_functions = {"rand", "srand", "printf", "time", "main"}
+
+        for i, line in enumerate(lines):
             line = line.strip()  
-
-            # Rule: Detect division by zero (manual logic, no regex).
-            if "/ 0" in line or "/0" in line:  
-                idx = line.find("/0")  # Find position of '/0'
-                # Check that it's not something like '/05', which is valid. Only plain 0 is invalid.
-                if idx != -1 and (idx + 2 == len(line) or not line[idx + 2].isdigit()):
-                    print(f"Line {i + 1}: Error - Division by zero detected.")  
-                    self.errors = True 
-
-            # Rule: Check for missing semicolon (skip structs since they may not end with semicolon).
-            if not line.endswith(";") and "struct" not in line:
-                print(f"Line {i + 1}: Missing semicolon at the end.")  
-                self.errors = True
-                continue  
-                
-            # Rule: Detect struct definition manually (no regex).
-            if line.startswith("struct") and "{" in line:
-                tokens = line.split()  
-                if len(tokens) >= 2:  
-                    self.struct_definitions.add(tokens[1])  
-                continue  
-                
-            # If line contains '=', separate declaration from initialization.
-            if "=" in line:
-                var_decl, value = line.split("=", 1)  # Split at first '=' into declaration and value
-                var_decl = var_decl.strip()  # - whitespace 
-                value = value.strip().strip(";")  # - spaces and semicolon
-            else:
-                var_decl = line.strip(";").strip()  
-                value = None  # No initialization value
-
-            var_parts = var_decl.split()  
-            if len(var_parts) < 2:  
-                print(f"Line {i + 1}: Invalid variable declaration.")  
-                self.errors = True
+            
+            # Skip empty lines or comments
+            if not line or line.startswith("//"):
                 continue
 
-            var_type = var_parts[0]  
-            var_name = var_parts[1]  
+            # Skip preprocessor directives like #include
+            if line.startswith("#include"):
+                continue
 
-            # Manually extract array dimensions.
-            dimensions = []  # Store list of dimensions found.
-            temp_name = ""  
-            reading = False  # inside brackets.
-            dim = ""  # collect digits.
-            for ch in var_name: 
-                if ch == "[": 
-                    reading = True  
-                    temp_name = var_name.split("[")[0]  # Strip array brackets from variable name.
-                    continue
-                if ch == "]":  # End 
-                    if dim.isdigit():  # Only add if dimension is numeric
-                        dimensions.append(int(dim))  # Add to list of dimensions
-                    dim = ""  
-                    reading = False 
-                    continue
-                if reading:  # If inside brackets, collect digits.
-                    dim += ch
+            # Skip 'case' and 'default' labels which are not variable declarations
+            if "case" in line or line.startswith("default:"):
+                continue
 
-            if "[" in var_name:  # Clean variable name 
-                var_name = var_name.split("[")[0]
-            is_2d_array = len(dimensions) == 2  
-            is_1d_array = len(dimensions) == 1  
-            is_array = is_1d_array or is_2d_array  
+            # Skip break statements
+            if "break;" in line:
+                continue
 
-            # Rule: Prevent redeclaration of the same variable or array.
-            if var_name in self.declared_variables:
-                existing_type = self.declared_variables[var_name]  # Get already stored type.
-                if (is_1d_array and existing_type == "2D") or (is_2d_array and existing_type == "1D"):
-                    print(f"Line {i + 1}: Error - '{var_name}' cannot be declared as both 1D and 2D array.")
-                    self.errors = True
+            # Skip function call lines like printf("hello");
+            if re.match(r"\w+\s*\(.*\)\s*;", line):
+                continue
+
+            # Skip control flow structures and opening/closing braces
+            if (line.endswith("{") or line == "}" or
+                re.match(r".*\)\s*{", line) or
+                re.match(r"\s*(if|while|for|switch)\s*\(.*\)\s*{?", line)):
+                continue
+
+            # Check for missing semicolon after return statement
+            if line.startswith("return"):
+                if not line.endswith(";"):
+                    errors.append(f"\nLine {i + 1}: Missing semicolon after return.")
+                continue
+
+            # Skip function calls again for redundancy
+            if re.match(r"\w+\s*\(.*\)\s*;", line):
+                continue
+
+            # Report error if declaration/assignment line does not end with semicolon
+            if not line.endswith(";"):
+                errors.append(f"\nLine {i + 1}: Missing semicolon at the end.")
+                continue
+
+            # Remove trailing semicolon for further analysis
+            clean_line = line.rstrip(";")
+
+            # Again, skip control structure braces
+            if (line.endswith("{") or line == "}" or
+                re.match(r".*\)\s*{", line) or
+                re.match(r"\s*(if|while|for|switch)\s*\(.*\)\s*{?", line)):
+                continue
+
+            # Detect struct definition like: struct Name {
+            struct_match = re.match(r"struct\s+(\w+)\s*{", clean_line)
+            if struct_match:
+                struct_definitions.add(struct_match.group(1))
+                continue
+
+            # Handle typedef struct { ... } Name;
+            typedef_struct_match = re.match(r"typedef\s+struct\s+(\w*)\s*{", clean_line)
+            if typedef_struct_match:
+                continue  # Logic can be expanded later for full typedef handling
+            elif re.match(r"typedef\s+struct\s*{[^}]*}\s*(\w+);", clean_line):
+                typedef_name = re.findall(r"}\s*(\w+);", clean_line)[0]
+                struct_definitions.add(typedef_name)
+                continue
+
+            # Attempt to split line into datatype and variable declaration(s)
+            # Same semantic rules (e.g., type checking, initialization format) But since the parsing is structurally different, the analysis must be reapplied in both blocks.
+            tokens = clean_line.split(None, 1)
+            if len(tokens) == 2:
+                var_type, rest = tokens
+                variables = [v.strip() for v in rest.split(",")]  # Support comma-separated declarations
+
+                for var in variables:
+                    var_name = var
+                    value = None  # Default value to None
+
+                    # Handle inline initialization like int x = 10;
+                    if "=" in var:
+                        var_name, value = [x.strip() for x in var.split("=", 1)]
+
+                    # Skip already declared or function-named variables
+                    if var_name in declared_variables or var_name in known_functions:
+                        continue  
+
+                    # Detect array dimensions like arr[2][3]
+                    size_match = re.findall(r"\[(\d*)\]", var_name)
+                    dimensions = [int(dim) for dim in size_match if dim.isdigit()]
+                    is_2d_array = len(dimensions) == 2
+                    is_1d_array = len(dimensions) == 1 or "[]" in var_name
+                    is_array = is_1d_array or is_2d_array
+
+                    # Extract actual variable name from array notation
+                    if is_array:
+                        var_type = var_type.replace("[]", "")
+                        var_name = var_name.split("[")[0]
+
+                    # Check if variable was already declared
+                    if var_name in declared_variables:
+                        existing_type = declared_variables[var_name]
+                        if (is_1d_array and existing_type == "2D") or (is_2d_array and existing_type == "1D"):
+                            errors.append(f"\nLine {i + 1}: Error - '{var_name}' cannot be declared as both 1D and 2D array.")
+                        else:
+                            errors.append(f"\nLine {i + 1}: Error - Variable '{var_name}' is already declared.")
+                        continue
+                    else:
+                        declared_variables[var_name] = "2D" if is_2d_array else "1D" if is_1d_array else "scalar"
+
+                    # Perform type checking and value validation
+                    if var_type in ["int", "long", "long long", "short"]:
+                        if is_2d_array:
+                            if not (value and value.startswith("{{") and value.endswith("}}")):
+                                errors.append(f"\nLine {i + 1}: Invalid initialization for 2D '{var_type}[][]'. Must use nested {{}}.")
+                        elif is_1d_array:
+                            if not (value and value.startswith("{") and value.endswith("}")):
+                                errors.append(f"\nLine {i + 1}: Invalid array initialization for '{var_type}[]'. Must use {{}}.")
+                            else:
+                                elements = value.strip("{}").split(",")
+                                elements = [ele.strip() for ele in elements]
+                                if not all(ele.isdigit() for ele in elements):
+                                    errors.append(f"\nLine {i + 1}: Datatype mismatch in '{var_type}[]' initialization.")
+                                if dimensions and len(elements) != dimensions[0]:
+                                    errors.append(f"\nLine {i + 1}: Expected {dimensions[0]} elements, but found {len(elements)}.")
+                        else:
+                            if value:
+                                tokens = re.findall(r'\b\w+\b', value)
+                                for token in tokens:
+                                    if not token.isdigit() and token not in declared_variables:
+                                        errors.append(f"\nLine {i + 1}: Unknown variable '{token}' used in initialization.")
+
+                    elif var_type in ["float", "double", "long double"]:
+                        if value:
+                            tokens = re.findall(r'\b\w+\b', value)
+                            for token in tokens:
+                                if not token.replace('.', '', 1).isdigit() and token not in declared_variables:
+                                    errors.append(f"\nLine {i + 1}: Unknown variable '{token}' used in initialization.")
+
+                    elif var_type == "bool":
+                        if value and value not in ["true", "false"]:
+                            errors.append(f"\nLine {i + 1}: Invalid initialization for 'bool'. Must be 'true' or 'false'.")
+
+                    elif var_type in struct_definitions or var_type in user_defined_types:
+                        if not (value and value.startswith("{") and value.endswith("}")):
+                            errors.append(f"\nLine {i + 1}: Invalid struct initialization. Must use '{{}}'.")
+
+                    elif var_type == "char":
+                        if value:
+                            value = value.strip()
+                            if len(value) != 3 or value[0] != "'" or value[-1] != "'":
+                                errors.append(f"\nLine {i + 1}: Invalid initialization for 'char'.")
+
+                    elif var_type == "char[]" or (var_type == "char" and is_array):
+                        if value and value.startswith("{") and value.endswith("}"):
+                            if not all(c.startswith('"') and c.endswith('"') for c in value.strip("{}").split(",")):
+                                errors.append(f"\nLine {i + 1}: Invalid character array initialization.")
+                        else:
+                            errors.append(f"\nLine {i + 1}: Invalid initialization for 'char[]'. Must be enclosed in {{}}.")
+                    else:
+                        errors.append(f"\nLine {i + 1}: Unsupported datatype '{var_type}'.")
+                continue  # Skip remaining logic if this multi-declaration was handled
+
+# Same semantic rules (e.g., type checking, initialization format) But since the parsing is structurally different, the analysis must be reapplied in both blocks.
+            # Fallback to handle simple single variable declarations or assignments
+            if "=" in clean_line:
+                parts = clean_line.split("=", 1)
+                left = parts[0].strip()
+                right = parts[1].strip()
+                tokens = left.split()
+
+                if len(tokens) == 2:
+                    var_type, var_name = tokens
+                    value = right
+                    is_declaration = True
                 else:
-                    print(f"Line {i + 1}: Error - Variable '{var_name}' is already declared.")
-                    self.errors = True
-            else:
-                
-                self.declared_variables[var_name] = "2D" if is_2d_array else "1D" if is_1d_array else "scalar"
+                    var_name = left
+                    value = right
+                    is_declaration = False
 
-            # Type Checking
+                # Skip lines like int x = rand();
+                if "rand()" in line or "srand()" in line:
+                    continue
+
+                if var_name == "rand" or var_name == "srand":
+                    continue
+
+                if var_type in ["float", "double", "long double"]:
+                    try:
+                        if value:
+                            float(value)
+                    except ValueError:
+                        errors.append(f"\nLine {i + 1}: Datatype mismatch for '{var_type}'.")
+
+                if not is_declaration:
+                    if var_name not in declared_variables:
+                        errors.append(f"\nLine {i + 1}: Assignment to undeclared variable '{var_name}'.")
+                    continue
+            else:
+                # Split declaration like int x;
+                tokens = clean_line.split()
+                if len(tokens) != 2:
+                    errors.append(f"\nLine {i + 1}: Invalid variable declaration.")
+                    continue
+                var_type, var_name = tokens
+                value = None
+
+            # Handle array detection again
+            size_match = re.findall(r"\[(\d*)\]", var_name)
+            dimensions = [int(dim) for dim in size_match if dim.isdigit()]
+            is_2d_array = len(dimensions) == 2
+            is_1d_array = len(dimensions) == 1 or "[]" in var_name
+            is_array = is_1d_array or is_2d_array
+
+            if is_array:
+                var_type = var_type.replace("[]", "")
+                var_name = var_name.split("[")[0]
+
+            # Redeclaration check
+            if var_name in declared_variables:
+                existing_type = declared_variables[var_name]
+                if (is_1d_array and existing_type == "2D") or (is_2d_array and existing_type == "1D"):
+                    errors.append(f"\nLine {i + 1}: Error - '{var_name}' cannot be declared as both 1D and 2D array.")
+                else:
+                    errors.append(f"\nLine {i + 1}: Error - Variable '{var_name}' is already declared.")
+                continue
+            else:
+                declared_variables[var_name] = "2D" if is_2d_array else "1D" if is_1d_array else "scalar"
+
+            # Type checking repeated for fallback block
             if var_type in ["int", "long", "long long", "short"]:
                 if is_2d_array:
-                    
-                    if not (value.startswith("{{") and value.endswith("}}")):
-                        print(f"Line {i + 1}: Invalid initialization for 2D '{var_type}[][]'. Must use nested {{}}.")
-                        self.errors = True
-                    else:
-                        inner = value.strip("{}").strip()  # Remove outer braces
-                        rows = inner.split("},{")  # Split rows based on inner braces
-                        if len(rows) != dimensions[0]:  # Row count mismatch
-                            print(f"Line {i + 1}: Expected {dimensions[0]} rows, but found {len(rows)}.")
-                            self.errors = True
-                        else:
-                            for row_idx, row in enumerate(rows):  # Check each row
-                                row = row.replace("{", "").replace("}", "").strip()  # Clean braces
-                                elements = [ele.strip() for ele in row.split(",") if ele.strip()]
-                                if len(elements) != dimensions[1]:  # Check element count in row
-                                    print(f"Line {i + 1}: Row {row_idx + 1} must have {dimensions[1]} elements, but found {len(elements)}.")
-                                    self.errors = True
-                                elif not all(ele.isdigit() for ele in elements):  # Type check elements
-                                    print(f"Line {i + 1}: Datatype mismatch in 2D array. All elements must be integers.")
-                                    self.errors = True
-
+                    if not (value and value.startswith("{{") and value.endswith("}}")):
+                        errors.append(f"\nLine {i + 1}: Invalid initialization for 2D '{var_type}[][]'. Must use nested {{}}.")
                 elif is_1d_array:
-                   
-                    if not (value.startswith("{") and value.endswith("}")):
-                        print(f"Line {i + 1}: Invalid array initialization for '{var_type}[]'. Must use {{}}.")
-                        self.errors = True
+                    if not (value and value.startswith("{") and value.endswith("}")):
+                        errors.append(f"\nLine {i + 1}: Invalid array initialization for '{var_type}[]'. Must use {{}}.")
                     else:
-                        elements = [ele.strip() for ele in value.strip("{}").split(",")]
+                        elements = value.strip("{}").split(",")
+                        elements = [ele.strip() for ele in elements]
                         if not all(ele.isdigit() for ele in elements):
-                            print(f"Line {i + 1}: Datatype mismatch in '{var_type}[]' initialization.")
-                            self.errors = True
-                        if dimensions and len(elements) != dimensions[0]:  # Length check.
-                            print(f"Line {i + 1}: Expected {dimensions[0]} elements, but found {len(elements)}.")
-                            self.errors = True
+                            errors.append(f"\nLine {i + 1}: Datatype mismatch in '{var_type}[]' initialization.")
+                        if dimensions and len(elements) != dimensions[0]:
+                            errors.append(f"\nLine {i + 1}: Expected {dimensions[0]} elements, but found {len(elements)}.")
                 else:
-                    # Scalar int type should be initialized with a number.
-                    if value and not value.isdigit():
-                        print(f"Line {i + 1}: Datatype mismatch for '{var_type}'.")
-                        self.errors = True
+                    if value:
+                        tokens = re.findall(r'\b\w+\b', value)
+                        for token in tokens:
+                            if not token.isdigit() and token not in declared_variables:
+                                errors.append(f"\nLine {i + 1}: Unknown variable '{token}' used in initialization.")
 
             elif var_type in ["float", "double", "long double"]:
                 try:
                     if value:
-                        float(value)  # Try converting to float to check validity.
+                        float(value)
                 except ValueError:
-                    print(f"Line {i + 1}: Datatype mismatch for '{var_type}'.")
-                    self.errors = True
+                    errors.append(f"\nLine {i + 1}: Datatype mismatch for '{var_type}'.")
 
             elif var_type == "bool":
-                if value and value not in ["true", "false"]: 
-                    print(f"Line {i + 1}: Invalid initialization for 'bool'. Must be 'true' or 'false'.")
-                    self.errors = True
+                if value and value not in ["true", "false"]:
+                    errors.append(f"\nLine {i + 1}: Invalid initialization for 'bool'. Must be 'true' or 'false'.")
 
-            elif var_type in self.struct_definitions:
-                # Structs must be initialized with {}
-                if not value.startswith("{") or not value.endswith("}"):
-                    print(f"Line {i + 1}: Invalid struct initialization. Must use '{{}}'.")
-                    self.errors = True
+            elif var_type in struct_definitions:
+                if not (value and value.startswith("{") and value.endswith("}")):
+                    errors.append(f"\nLine {i + 1}: Invalid struct initialization. Must use '{{}}'.")
 
             elif var_type == "char":
                 if value:
                     value = value.strip()
-                    if len(value) != 3 or value[0] != "'" or value[-1] != "'":  
-                        print(f"Line {i + 1}: Invalid initialization for 'char'.")
-                        self.errors = True
+                    if len(value) != 3 or value[0] != "'" or value[-1] != "'":
+                        errors.append(f"\nLine {i + 1}: Invalid initialization for 'char'.")
 
             elif var_type == "char[]" or (var_type == "char" and is_array):
-                if value and (not value.startswith("\"") or not value.endswith("\"")):
-                    print(f"Line {i + 1}: Datatype mismatch for 'char[]'. Use double quotes.")
-                    self.errors = True
-
+                if value and value.startswith("{") and value.endswith("}"):
+                    if not all(c.startswith('"') and c.endswith('"') for c in value.strip("{}").split(",")):
+                        errors.append(f"\nLine {i + 1}: Invalid character array initialization.")
+                else:
+                    errors.append(f"\nLine {i + 1}: Invalid initialization for 'char[]'. Must be enclosed in {{}}.")
             else:
-                print(f"Line {i + 1}: Unknown data type '{var_type}'.") 
-                self.errors = True
+                errors.append(f"\nLine {i + 1}: Unsupported datatype '{var_type}'.")
 
-        if not self.errors: 
-            print("No errors found.")
-
-    def run(self): 
-        print("Enter your code line by line. Press Enter on a blank line to finish.")
-        user_code = []  
-        while True:
-            line = input("> ") 
-            if not line.strip():  
-                break
-            user_code.append(line)  
-        self.analyze_code(user_code) 
-
-
-if __name__ == "__main__":
-    analyzer = Semantic()  
-    analyzer.run() 
+        # Return all collected semantic errors
+        return errors

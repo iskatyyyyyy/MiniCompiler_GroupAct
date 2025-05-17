@@ -1,3 +1,4 @@
+
 import re
 from lexical import Tokens, Lexical
 
@@ -13,6 +14,13 @@ class Semantic:
 
     @staticmethod
     def analyze_code(lines):
+        try:
+            print("Semantic Analyzer Executed!")
+            errors = []
+
+        except Exception as e:
+            print(f"Semantic Analysis Error: {e}")
+
         errors = []
         struct_definitions = set()
         declared_variables = {}
@@ -28,8 +36,12 @@ class Semantic:
             if not line or line.startswith("//"):
                 continue
 
-            # Ignore preprocessor directives
-            if line.startswith("#include"):
+            # Special case: allow #include <stdio.h> without semicolon or error
+            if line.startswith("#include <stdio.h>"):
+                continue
+
+            # Ignore other preprocessor directives as well
+            if line.startswith("#") and not line.startswith("#include <stdio.h>"):
                 continue
 
             # Handle case and default statements differently (no semicolon required)
@@ -40,38 +52,22 @@ class Semantic:
             if "break;" in line:
                 continue
 
-            # Handle function calls (no semicolon check needed)
-            if re.match(r"\w+\s*\(.*\)\s*;", line):
-                continue
-
             # Skip control structures or braces (no semicolon needed after these)
             if (line.endswith("{") or line == "}" or
                 re.match(r".*\)\s*{", line) or
                 re.match(r"\s*(if|while|for|switch)\s*\(.*\)\s*{?", line)):
                 continue
 
-            # Handle return statement
+            # Handle return statement - no semicolon check here (moved to parser)
             if line.startswith("return"):
-                if not line.endswith(";"):
-                    errors.append(f"\nLine {i + 1}: Missing semicolon after return.")
                 continue
 
             # Skip function calls
             if re.match(r"\w+\s*\(.*\)\s*;", line):
                 continue
 
-            # Require semicolon for declarations/assignments
-            if not line.endswith(";"):
-                errors.append(f"\nLine {i + 1}: Missing semicolon at the end.")
-                continue
-
+            # Remove trailing semicolon if any, but do not error if missing (parser handles it)
             clean_line = line.rstrip(";")
-
-            # Skip control structures or braces
-            if (line.endswith("{") or line == "}" or
-                re.match(r".*\)\s*{", line) or
-                re.match(r"\s*(if|while|for|switch)\s*\(.*\)\s*{?", line)):
-                continue
 
             # Struct definition
             struct_match = re.match(r"struct\s+(\w+)\s*{", clean_line)
@@ -102,6 +98,7 @@ class Semantic:
                     if "=" in var:
                         var_name, value = [x.strip() for x in var.split("=", 1)]
 
+                    # Redeclaration check
                     if var_name in declared_variables or var_name in known_functions:
                         continue  
 
@@ -116,7 +113,6 @@ class Semantic:
                         var_type = var_type.replace("[]", "")
                         var_name = var_name.split("[")[0]
 
-                    # Redeclaration check
                     if var_name in declared_variables:
                         existing_type = declared_variables[var_name]
                         if (is_1d_array and existing_type == "2D") or (is_2d_array and existing_type == "1D"):
@@ -181,6 +177,14 @@ class Semantic:
                 continue  # Skip the old declaration logic if multi-decl was used
 
             # === FALLBACK to existing single-declaration logic ===
+
+            # Handle increments/decrements like var++, ++var, var--, --var
+            incdec_match = re.match(r"(\+\+|--)?(\w+)(\+\+|--)?$", clean_line)
+            if incdec_match:
+                var_name = incdec_match.group(2)
+                if var_name not in declared_variables:
+                    errors.append(f"\nLine {i + 1}: Undeclared variable '{var_name}' used in increment/decrement.")
+                continue
 
             if "=" in clean_line:
                 parts = clean_line.split("=", 1)

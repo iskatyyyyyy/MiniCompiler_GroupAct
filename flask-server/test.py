@@ -23,15 +23,15 @@ int main() {
         x++;
     }
 
-    switch (x {
+    switch (x) {
         case 5:
             x += 1;
             break;
-        case 10
+        case 10:
             x += 2;
-            break
-        default
-            x = 0
+            break;
+        default:
+            x = 0;
     }
 
     return 0;

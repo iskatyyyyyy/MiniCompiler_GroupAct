@@ -462,3 +462,6 @@ class Parser:
             self.synchronize([';'])  # Assume switch is terminated and continue
 
         return SwitchStatement(expr, cases, default_case)
+
+## Example usage
+

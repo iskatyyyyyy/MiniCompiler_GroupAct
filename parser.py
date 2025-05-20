@@ -27,15 +27,20 @@ class Parser:
 
     def expect(self, token_type, value=None):
         if self.current_token is None:
-            self.report_error(f"Unexpected end of input, expected {token_type} '{value}'")
+            self.report_error(f"[Parser Error] Unexpected end of input, expected {token_type} '{value}'")
             return None
 
         token = self.match(token_type, value)
         if not token:
             expected_val = f" '{value}'" if value is not None else ""
-            actual_val = f"{self.current_token.type}('{self.current_token.value}')"
-            self.report_error(f"Expected {token_type}{expected_val}, but got {actual_val} at line {self.current_token.line}")
+            actual_val = f"{self.current_token.type}('{self.current_token.value}')" if self.current_token else "None"
+            line = self.current_token.line if self.current_token else "EOF"
+            self.report_error(f"[Parser Error] Expected {token_type}{expected_val}, but got {actual_val} at line {line}")
+            return None
+
         return token
+
+
     
     def eat(self, expected_type, expected_value=None):
         token = self.current_token
@@ -54,12 +59,18 @@ class Parser:
         self.errors.append(message)
         print(f"[Parser Error] {message}")
 
-    def synchronize(self):
-        # Skip tokens until we reach a likely statement boundary
-        while self.current_token and self.current_token.value not in (';', '}', '{'):
+    def synchronize(self, stop_tokens=(';', '}', '{')):
+        """
+        Skip tokens until a likely recovery point (e.g., end of statement or block).
+        You can provide custom stop tokens like [')', '{', ';'] depending on context.
+        """
+        while self.current_token and self.current_token.value not in stop_tokens:
             self.advance()
-        if self.current_token and self.current_token.value in (';', '}', '{'):
+
+        # Optionally consume the stop token too (to move past it)
+        if self.current_token and self.current_token.value in stop_tokens:
             self.advance()
+
 
 
     # Parse the entire program
@@ -81,31 +92,61 @@ class Parser:
 
     # Parsing Declarations and Functions
     def parse_declaration_or_function(self):
-        var_type = self.expect('KEYWORD').value
-        name = self.expect('IDENTIFIER').value
+        var_type_token = self.expect('KEYWORD')
+        if not var_type_token:
+            self.synchronize([';', '}'])
+            return None
+
+        name_token = self.expect('IDENTIFIER')
+        if not name_token:
+            self.synchronize([';', '}'])
+            return None
+
+        var_type = var_type_token.value
+        name = name_token.value
 
         if self.match('SYMBOL', '('):
             parameters = []
-            # Parse parameters properly without consuming the closing ')'
-            if self.current_token.value != ')':
+
+            if self.current_token and self.current_token.value != ')':
                 while True:
-                    param_type = self.expect('KEYWORD').value
-                    param_name = self.expect('IDENTIFIER').value
-                    parameters.append((param_type, param_name))
-                    if self.current_token.value == ')':
+                    param_type_token = self.expect('KEYWORD')
+                    param_name_token = self.expect('IDENTIFIER')
+
+                    if not param_type_token or not param_name_token:
+                        self.report_error("Invalid parameter in function declaration.")
+                        self.synchronize([')', '{'])
                         break
-                    self.expect('SYMBOL', ',')
-            self.expect('SYMBOL', ')')  # Consume the closing ')'
+
+                    parameters.append((param_type_token.value, param_name_token.value))
+
+                    if self.current_token and self.current_token.value == ')':
+                        break
+                    if not self.expect('SYMBOL', ','):
+                        self.report_error("Expected ',' or ')' after function parameter.")
+                        self.synchronize([')', '{'])
+                        break
+
+            if not self.expect('SYMBOL', ')'):
+                self.report_error("Expected ')' to close parameter list.")
+                self.synchronize(['{', ';'])  # Try to recover to the start of function body or next decl
+                return None
 
             body = self.parse_compound_statement()
+            if not body:
+                self.report_error(f"Invalid function body for '{name}'.")
             return FunctionDeclaration(var_type, name, parameters, body)
 
         else:
             initializer = None
             if self.match('OPERATOR', '='):
                 initializer = self.parse_expression()
-            self.expect('SYMBOL', ';')
+            if not self.expect('SYMBOL', ';'):
+                self.report_error(f"Expected ';' after variable declaration '{name}'.")
+                self.synchronize([';', '}'])
+                return None
             return VariableDeclaration(var_type, name, initializer)
+
 
 
     # Parsing Compound Statements (Blocks)

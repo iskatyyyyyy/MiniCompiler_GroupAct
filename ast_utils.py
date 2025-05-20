@@ -20,6 +20,8 @@ def expression_to_str(expr):
         return f'"{expr.value}"'
     elif t == 'CharNode':
         return f"'{expr.value}'"
+    elif t == 'AssignmentExpression':
+        return f"{expression_to_str(expr.left)} {expr.operator} {expression_to_str(expr.right)}"
     return f"<UnknownExpr:{t}>"
 
 
@@ -57,6 +59,14 @@ def pretty_print(node, indent=0):
             print(f"{indent_str}Declaration: {node.var_type} {node.name} = {init_str}")
         else:
             print(f"{indent_str}Declaration: {node.var_type} {node.name}")
+
+    elif t == 'AssignmentExpression':
+        print(f"{indent_str}AssignmentExpression:")
+        print(f"{indent_str}  operator: {node.operator}")
+        print(f"{indent_str}  left:")
+        pretty_print(node.left, indent + 2)
+        print(f"{indent_str}  right:")
+        pretty_print(node.right, indent + 2)
 
     elif t == 'IfStatement':
         print(f"{indent_str}IfStatement:")

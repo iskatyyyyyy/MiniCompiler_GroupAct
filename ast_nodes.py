@@ -158,6 +158,50 @@ class ForStatement(ASTNode):
     def __str__(self):
         return f"for ({self.init}; {self.condition}; {self.increment}) {self.body}"
 
+class BreakStatement(ASTNode):
+    def __repr__(self):
+        return "BreakStatement()"
+
+    def __str__(self):
+        return "break;"
+
+class ContinueStatement(ASTNode):
+    def __repr__(self):
+        return "ContinueStatement()"
+
+    def __str__(self):
+        return "continue;"
+
+class SwitchCase(ASTNode):
+    def __init__(self, value, body):
+        self.value = value
+        self.body = body
+
+    def __repr__(self):
+        return f"SwitchCase({self.value!r}, {self.body!r})"
+
+    def __str__(self):
+        return f"case {self.value}:\n{self.body}"
+
+class SwitchStatement(ASTNode):
+    def __init__(self, expression, cases, default=None):
+        self.expression = expression
+        self.cases = cases  # list of SwitchCase
+        self.default = default
+
+    def __repr__(self):
+        return f"SwitchStatement({self.expression!r}, {self.cases!r}, default={self.default!r})"
+
+    def __str__(self):
+        result = f"switch ({self.expression}) {{\n"
+        result += "\n".join(str(case) for case in self.cases)
+        if self.default:
+            result += f"\ndefault:\n{self.default}"
+        result += "\n}"
+        return result
+
+
+
 class ReturnStatement(ASTNode):
     def __init__(self, value):
         self.value = value
@@ -167,6 +211,10 @@ class ReturnStatement(ASTNode):
 
     def __str__(self):
         return f"return {self.value};"
+    
+class Program(ASTNode):
+    def __init__(self, statements):
+        self.statements = statements
 
 class Block(ASTNode):
     def __init__(self, statements):

@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify
 from lexical import Lexical
-from parser import Parser, ASTPrinter
+from parser import Parser
+from ast_utils import pretty_print
+
 from semantic import Semantic
 
 app = Flask(__name__)
@@ -23,10 +25,10 @@ def analyze_code():
     parser = Parser(tokens)
     ast, parser_errors = parser.parse()
 
+    # AST Output
     ast_output = ""
     if ast:
-        printer = ASTPrinter()
-        ast_output = printer.print_ast(ast)
+        ast_output = pretty_print(ast)
 
     # Semantic Analysis (output is printed, you might want to capture it differently)
     semantic_output = Semantic.analyze_code(user_code_lines)

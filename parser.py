@@ -7,7 +7,8 @@ class Parser:
         self.tokens = tokens
         self.pos = 0
         self.current_token = self.tokens[self.pos] if self.tokens else None
-
+        self.errors = []
+        
     # Token Navigation
     def advance(self):
         self.pos += 1
@@ -26,45 +27,56 @@ class Parser:
 
     def expect(self, token_type, value=None):
         if self.current_token is None:
-            raise SyntaxError(f"Unexpected end of input, expected {token_type} '{value}'")
-    
+            self.report_error(f"Unexpected end of input, expected {token_type} '{value}'")
+            return None
+
         token = self.match(token_type, value)
         if not token:
             expected_val = f" '{value}'" if value is not None else ""
             actual_val = f"{self.current_token.type}('{self.current_token.value}')"
-            raise SyntaxError(f"Expected {token_type}{expected_val}, but got {actual_val} at line {self.current_token.line}")
-        
+            self.report_error(f"Expected {token_type}{expected_val}, but got {actual_val} at line {self.current_token.line}")
         return token
     
     def eat(self, expected_type, expected_value=None):
         token = self.current_token
         if not token:
-            raise SyntaxError("Unexpected end of input")
-
+            self.report_error("Unexpected end of input")
+            return
         if token.type != expected_type:
-            raise SyntaxError(f"Expected type '{expected_type}', but got {token.type}('{token.value}') on line {token.line}")
-
+            self.report_error(f"Expected type '{expected_type}', but got {token.type}('{token.value}') on line {token.line}")
+            return
         if expected_value is not None and token.value != expected_value:
-            raise SyntaxError(f"Expected value '{expected_value}', but got '{token.value}' on line {token.line}")
-
+            self.report_error(f"Expected value '{expected_value}', but got '{token.value}' on line {token.line}")
+            return
         self.advance()
+    
+    def report_error(self, message):
+        self.errors.append(message)
+        print(f"[Parser Error] {message}")
+
+    def synchronize(self):
+        # Skip tokens until we reach a likely statement boundary
+        while self.current_token and self.current_token.value not in (';', '}', '{'):
+            self.advance()
+        if self.current_token and self.current_token.value in (';', '}', '{'):
+            self.advance()
+
 
     # Parse the entire program
     def parse(self):
         statements = []
         while self.current_token and self.current_token.type != 'EOF':
-            if self.current_token.type == 'KEYWORD' and self.current_token.value in ('int', 'float', 'char', 'void'):
-                # Parse declarations or functions starting with a keyword like 'int'
-                node = self.parse_declaration_or_function()
-            else:
-                # Parse other statements, e.g. assignments or expressions
-                node = self.parse_statement()
-                if node is None:
-                    # If parse_statement returns None, means unexpected token or parse error
-                    raise SyntaxError(f"Unexpected token {self.current_token.type}('{self.current_token.value}') on line {self.current_token.line}")
-
-            statements.append(node)
-
+            try:
+                if self.current_token.type == 'KEYWORD' and self.current_token.value in ('int', 'float', 'char', 'void'):
+                    node = self.parse_declaration_or_function()
+                else:
+                    node = self.parse_statement()
+                    if node is None:
+                        raise SyntaxError(f"Unexpected token {self.current_token.type}('{self.current_token.value}') on line {self.current_token.line}")
+                statements.append(node)
+            except SyntaxError as e:
+                self.report_error(str(e))
+                self.synchronize()
         return statements
 
     # Parsing Declarations and Functions
@@ -109,22 +121,37 @@ class Parser:
 
     # Parsing Statements
     def parse_statement(self):
-        if self.current_token.value == 'if':
-            return self.parse_if_statement()
-        elif self.current_token.value == 'while':
-            return self.parse_while_statement()
-        elif self.current_token.value == 'for':
-            return self.parse_for_statement()
-        elif self.current_token.value == 'return':
-            return self.parse_return_statement()
-        elif self.current_token.value in ('int', 'char', 'float', 'double', 'void'):
-            return self.parse_declaration()
-        elif self.current_token.value == '{':
-            return self.parse_compound_statement()
-        else:
-            expr = self.parse_expression()
-            self.expect('SYMBOL', ';')
-            return ExpressionStatement(expr)
+        try:
+            if self.current_token.value == 'if':
+                return self.parse_if_statement()
+            elif self.current_token.value == 'while':
+                return self.parse_while_statement()
+            elif self.current_token.value == 'for':
+                return self.parse_for_statement()
+            elif self.current_token.value == 'switch':
+                return self.parse_switch_statement()
+            elif self.current_token.value == 'break':
+                self.eat('KEYWORD', 'break')
+                self.expect('SYMBOL', ';')
+                return BreakStatement()
+            elif self.current_token.value == 'continue':
+                self.eat('KEYWORD', 'continue')
+                self.expect('SYMBOL', ';')
+                return ContinueStatement()
+            elif self.current_token.value == 'return':
+                return self.parse_return_statement()
+            elif self.current_token.value in ('int', 'char', 'float', 'double', 'void'):
+                return self.parse_declaration()
+            elif self.current_token.value == '{':
+                return self.parse_compound_statement()
+            else:
+                expr = self.parse_expression()
+                self.expect('SYMBOL', ';')
+                return ExpressionStatement(expr)
+        except SyntaxError as e:
+            self.report_error(str(e))
+            self.synchronize()
+            return None
 
     def parse_declaration(self):
         var_type = self.current_token.value
@@ -187,45 +214,50 @@ class Parser:
 
     def parse_primary(self):
         token = self.current_token
+        if token is None:
+            self.report_error("Unexpected end of input in primary expression")
+            return None
 
-        if token.type == 'NUMBER':
-            self.eat('NUMBER')
-            return Number(token.value)
+        try:
+            if token.type == 'NUMBER':
+                self.eat('NUMBER')
+                return Number(token.value)
+            elif token.type == 'STRING':
+                self.eat('STRING')
+                return StringNode(token.value)
+            elif token.type == 'CHAR_LITERAL':
+                self.eat('CHAR_LITERAL')
+                return CharNode(token.value)
+            elif token.type == 'IDENTIFIER':
+                name = token.value
+                self.eat('IDENTIFIER')
+                if self.current_token and self.current_token.value == '(':
+                    self.eat('SYMBOL', '(')
+                    args = []
+                    if self.current_token.value != ')':
+                        while True:
+                            args.append(self.parse_expression())
+                            if self.current_token.value == ',':
+                                self.eat('SYMBOL', ',')
+                            else:
+                                break
+                    self.expect('SYMBOL', ')')
+                    return FunctionCallNode(name, args)
+                else:
+                    return VariableNode(name)
+            elif token.value == '(':
+                self.eat('SYMBOL', '(')
+                expr = self.parse_expression()
+                self.expect('SYMBOL', ')')
+                return expr
+        except SyntaxError as e:
+            self.report_error(str(e))
+            self.synchronize()
+            return None
 
-        elif token.type == 'STRING':
-            self.eat('STRING')
-            return StringNode(token.value)
-
-        elif token.type == 'CHAR_LITERAL':
-            self.eat('CHAR_LITERAL')
-            return CharNode(token.value)  # Make sure you have CharNode in your AST nodes
-
-        elif token.type == 'IDENTIFIER':
-            identifier_token = token
-            self.eat('IDENTIFIER')
-
-            if self.current_token and self.current_token.value == '(':
-                self.expect('SYMBOL','(')
-                args = []
-                if self.current_token.value != ')':
-                    while True:
-                        args.append(self.parse_expression())
-                        if self.current_token.value == ',':
-                            self.expect('SYMBOL',',')
-                        else:
-                            break
-                self.expect('SYMBOL',')')
-                return FunctionCallNode(identifier_token.value, args)
-            else:
-                return VariableNode(identifier_token.value)
-
-        elif token.value == '(':
-            self.eat('(')
-            expr = self.parse_expression()
-            self.eat(')')
-            return expr
-
-        raise SyntaxError(f"Unexpected token {token.type}('{token.value}') on line {token.line}")
+        self.report_error(f"Unexpected token {token.type}('{token.value}') on line {token.line}")
+        self.advance()
+        return None
 
     def parse_postfix(self):
         expr = self.parse_primary()
@@ -252,17 +284,21 @@ class Parser:
     # Control structures
 
     def parse_if_statement(self):
-        self.expect('KEYWORD', 'if')
-        self.expect('SYMBOL', '(')
-        condition = self.parse_expression()
-        self.expect('SYMBOL', ')')
-        then_branch = self.parse_statement()
-
-        else_branch = None
-        if self.match('KEYWORD', 'else'):
-            else_branch = self.parse_statement()
-
-        return IfStatement(condition, then_branch, else_branch)
+        try:
+            self.eat('KEYWORD', 'if')
+            self.expect('SYMBOL', '(')
+            condition = self.parse_expression()
+            self.expect('SYMBOL', ')')
+            then_branch = self.parse_statement()
+            else_branch = None
+            if self.current_token and self.current_token.value == 'else':
+                self.eat('KEYWORD', 'else')
+                else_branch = self.parse_statement()
+            return IfStatement(condition, then_branch, else_branch)
+        except SyntaxError as e:
+            self.report_error(str(e))
+            self.synchronize()
+            return None
 
     def parse_while_statement(self):
         self.expect('KEYWORD', 'while')
@@ -309,10 +345,79 @@ class Parser:
 
 
     def parse_return_statement(self):
-        self.expect('KEYWORD', 'return')
-        value = None
-        if self.current_token.value != ';':
-            value = self.parse_expression()
-        self.expect('SYMBOL', ';')
-        return ReturnStatement(value)
+        try:
+            self.eat('KEYWORD', 'return')
+            if self.current_token.value != ';':
+                expr = self.parse_expression()
+            else:
+                expr = None
+            self.expect('SYMBOL', ';')
+            return ReturnStatement(expr)
+        except SyntaxError as e:
+            self.report_error(str(e))
+            self.synchronize()
+            return None
 
+    def parse_switch_statement(self):
+        try:
+            self.expect('KEYWORD', 'switch')
+            self.expect('SYMBOL', '(')
+            expr = self.parse_expression()
+            self.expect('SYMBOL', ')')
+            self.expect('SYMBOL', '{')
+        except SyntaxError as e:
+            self.errors.append(str(e))
+            self.synchronize(['}'])  # Skip to the end of switch block
+            return None
+
+        cases = []
+        default_case = None
+
+        while self.current_token and self.current_token.value != '}':
+            try:
+                if self.match('KEYWORD', 'case'):
+                    value = self.parse_expression()
+                    self.expect('SYMBOL', ':')
+
+                    case_statements = []
+                    while self.current_token and self.current_token.value not in ('case', 'default', '}'):
+                        try:
+                            stmt = self.parse_statement()
+                            if stmt:
+                                case_statements.append(stmt)
+                        except SyntaxError as e:
+                            self.errors.append(str(e))
+                            self.synchronize(['case', 'default', '}'])
+
+                    case_block = Block(case_statements)
+                    cases.append(SwitchCase(value, case_block))
+
+                elif self.match('KEYWORD', 'default'):
+                    self.expect('SYMBOL', ':')
+
+                    default_statements = []
+                    while self.current_token and self.current_token.value not in ('case', 'default', '}'):
+                        try:
+                            stmt = self.parse_statement()
+                            if stmt:
+                                default_statements.append(stmt)
+                        except SyntaxError as e:
+                            self.errors.append(str(e))
+                            self.synchronize(['case', 'default', '}'])
+
+                    default_case = SwitchCase(None, Block(default_statements))
+
+                else:
+                    raise SyntaxError(f"Unexpected token {self.current_token.value} in switch block")
+
+            except SyntaxError as e:
+                self.errors.append(str(e))
+                self.synchronize(['case', 'default', '}'])
+
+        try:
+            self.expect('SYMBOL', '}')
+        except SyntaxError as e:
+            self.errors.append(str(e))
+            self.synchronize([';'])  # Assume switch is terminated and continue
+
+        return SwitchStatement(expr, cases, default_case)

@@ -105,6 +105,19 @@ class VariableDeclaration(ASTNode):
         if self.initializer:
             return f"{self.var_type} {self.name} = {self.initializer};"
         return f"{self.var_type} {self.name};"
+    
+class AssignmentExpression(ASTNode):
+    def __init__(self, operator, left, right):
+        self.operator = operator  # '=', '+=', '-=', etc.
+        self.left = left          # should be VariableNode or something assignable
+        self.right = right        # expression on the right side
+
+    def __repr__(self):
+        return f"AssignmentExpression({self.left} {self.operator} {self.right})"
+    
+    def __str__(self):
+        return f"({self.left} {self.operator} {self.right})"
+
 
 class IfStatement(ASTNode):
     def __init__(self, condition, then_branch, else_branch=None):
@@ -143,7 +156,7 @@ class ForStatement(ASTNode):
         return f"ForStatement({self.init!r}, {self.condition!r}, {self.increment!r}, {self.body!r})"
 
     def __str__(self):
-        return f"for ({self.init} {self.condition}; {self.increment}) {self.body}"
+        return f"for ({self.init}; {self.condition}; {self.increment}) {self.body}"
 
 class ReturnStatement(ASTNode):
     def __init__(self, value):

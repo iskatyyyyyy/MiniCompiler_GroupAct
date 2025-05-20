@@ -14,7 +14,7 @@ class Parser:
         if self.pos < len(self.tokens):
             self.current_token = self.tokens[self.pos]
         else:
-            self.current_token = Tokens('EOF', 'EOF', self.current_token.line)
+            self.current_token = None
 
     def match(self, token_type, value=None):
         if self.current_token and self.current_token.type == token_type:
@@ -25,29 +25,47 @@ class Parser:
         return None
 
     def expect(self, token_type, value=None):
+        if self.current_token is None:
+            raise SyntaxError(f"Unexpected end of input, expected {token_type} '{value}'")
+    
         token = self.match(token_type, value)
         if not token:
-            raise SyntaxError(f"Expected {token_type} '{value}' at line {self.current_token.line if self.current_token else 'EOF'}")
+            expected_val = f" '{value}'" if value is not None else ""
+            actual_val = f"{self.current_token.type}('{self.current_token.value}')"
+            raise SyntaxError(f"Expected {token_type}{expected_val}, but got {actual_val} at line {self.current_token.line}")
+        
         return token
     
-    def eat(self, expected_type_or_value):
+    def eat(self, expected_type, expected_value=None):
         token = self.current_token
-        if token.type == expected_type_or_value or token.value == expected_type_or_value:
-            self.advance()
-        else:
-            raise SyntaxError(f"Expected '{expected_type_or_value}', but got {token.type}('{token.value}') on line {token.line}")
+        if not token:
+            raise SyntaxError("Unexpected end of input")
+
+        if token.type != expected_type:
+            raise SyntaxError(f"Expected type '{expected_type}', but got {token.type}('{token.value}') on line {token.line}")
+
+        if expected_value is not None and token.value != expected_value:
+            raise SyntaxError(f"Expected value '{expected_value}', but got '{token.value}' on line {token.line}")
+
+        self.advance()
 
     # Parse the entire program
     def parse(self):
-        declarations = []
+        statements = []
         while self.current_token and self.current_token.type != 'EOF':
-            if self.current_token.type == 'KEYWORD':
-                decl = self.parse_declaration_or_function()
-                declarations.append(decl)
+            if self.current_token.type == 'KEYWORD' and self.current_token.value in ('int', 'float', 'char', 'void'):
+                # Parse declarations or functions starting with a keyword like 'int'
+                node = self.parse_declaration_or_function()
             else:
-                # Unexpected token or end of declarations
-                break
-        return declarations
+                # Parse other statements, e.g. assignments or expressions
+                node = self.parse_statement()
+                if node is None:
+                    # If parse_statement returns None, means unexpected token or parse error
+                    raise SyntaxError(f"Unexpected token {self.current_token.type}('{self.current_token.value}') on line {self.current_token.line}")
+
+            statements.append(node)
+
+        return statements
 
     # Parsing Declarations and Functions
     def parse_declaration_or_function(self):
@@ -72,7 +90,7 @@ class Parser:
 
         else:
             initializer = None
-            if self.match('SYMBOL', '='):
+            if self.match('OPERATOR', '='):
                 initializer = self.parse_expression()
             self.expect('SYMBOL', ';')
             return VariableDeclaration(var_type, name, initializer)
@@ -105,7 +123,7 @@ class Parser:
             return self.parse_compound_statement()
         else:
             expr = self.parse_expression()
-            self.eat(';')
+            self.expect('SYMBOL', ';')
             return ExpressionStatement(expr)
 
     def parse_declaration(self):
@@ -116,10 +134,11 @@ class Parser:
 
         initializer = None
         if self.current_token.value == '=':
-            self.eat('=')
+            self.expect('OPERATOR','=')
             initializer = self.parse_expression()
 
-        self.eat(';')
+        self.expect('SYMBOL',';')
+        
         return VariableDeclaration(var_type, var_name, initializer)
 
     # Parsing Expressions
@@ -133,7 +152,12 @@ class Parser:
             op = self.current_token.value
             self.eat('OPERATOR')
             right = self.parse_assignment()
-            return BinaryOperation(op, left, right)
+
+            # Validate left side is assignable (e.g., VariableNode)
+            if not isinstance(left, VariableNode):
+                raise SyntaxError(f"Invalid left-hand side in assignment at line {self.current_token.line}")
+
+            return AssignmentExpression(op, left, right)
         return left
     
     def parse_unary(self):
@@ -181,16 +205,16 @@ class Parser:
             self.eat('IDENTIFIER')
 
             if self.current_token and self.current_token.value == '(':
-                self.eat('(')
+                self.expect('SYMBOL','(')
                 args = []
                 if self.current_token.value != ')':
                     while True:
                         args.append(self.parse_expression())
                         if self.current_token.value == ',':
-                            self.eat(',')
+                            self.expect('SYMBOL',',')
                         else:
                             break
-                self.eat(')')
+                self.expect('SYMBOL',')')
                 return FunctionCallNode(identifier_token.value, args)
             else:
                 return VariableNode(identifier_token.value)

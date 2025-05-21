@@ -239,4 +239,8 @@ class FunctionDeclaration(ASTNode):
 
     def __str__(self):
         params = ', '.join(f"{typ} {name}" for typ, name in self.parameters)
+<<<<<<< HEAD
         return f"{self.return_type} {self.name}({params}) {self.body}"
+=======
+        return f"{self.return_type} {self.name}({params}) {self.body}"
+>>>>>>> origin/master

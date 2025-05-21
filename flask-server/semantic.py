@@ -2,7 +2,7 @@
 from ast_nodes import *
 from ast_utils import expression_to_str
 
-class SemanticAnalyzer:
+class Semantic:
     def __init__(self):
         self.errors = False
         self.symbol_table = {}

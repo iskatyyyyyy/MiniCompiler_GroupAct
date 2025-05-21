@@ -1,3 +1,4 @@
+
 from ast_nodes import *
 from lexical import Lexical, Tokens
 
@@ -463,9 +464,4 @@ class Parser:
 
         return SwitchStatement(expr, cases, default_case)
 
-<<<<<<< HEAD
 ## Example usage
-
-=======
-## Example usage
->>>>>>> origin/master

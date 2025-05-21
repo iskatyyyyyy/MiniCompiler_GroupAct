@@ -1,3 +1,4 @@
+
 import difflib
 
 class Tokens:
@@ -8,8 +9,6 @@ class Tokens:
 
     def __repr__(self):
         return f'{self.value:<30} {self.type:<20} {self.line}'
-<<<<<<< HEAD
-=======
     
     def to_dict(self):
         return {
@@ -18,7 +17,6 @@ class Tokens:
             'line': self.line
         }
 
->>>>>>> origin/master
 
 class Lexical:
     def __init__(self, text):
@@ -258,8 +256,4 @@ class Lexical:
             self.advanceNextChar()
             self.last_token_type = error_token.type
 
-<<<<<<< HEAD
         return tokens, errors
-=======
-        return tokens, errors
->>>>>>> origin/master

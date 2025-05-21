@@ -1,47 +1,56 @@
+# server.py (No changes needed, already correct)
 from flask import Flask, request, jsonify
 from lexical import Lexical
-from parser import Parser, ASTPrinter
-from semantic import Semantic
+from parser import Parser
+from semantic import SemanticAnalyzer
+from ast_utils import expression_to_str
 
 app = Flask(__name__)
 
-@app.route("/analyze", methods=["POST"])
-def analyze_code():
+@app.route('/analyze', methods=['POST'])
+def analyze():
     data = request.get_json()
-    user_code = data.get("code", "")
-    
-    if not user_code:
-        return jsonify({"error": "No code provided"}), 400
+    source_code = data.get("code", "")
 
-    user_code_lines = user_code.splitlines()
+    try:
+        # Lexical analysis
+        lexer = Lexical(source_code)
+        tokens, lexical_errors = lexer.get_tokens()
 
-    # Lexical Analysis
-    lexer = Lexical(user_code)
-    tokens, lexer_errors = lexer.get_tokens()
+        # Convert token objects to dicts for JSON serialization
+        tokens_list = [{
+            "type": token.type,
+            "value": token.value,
+            "line": token.line
+        } for token in tokens]
 
-    # Parser Analysis
-    parser = Parser(tokens)
-    ast, parser_errors = parser.parse()
+        # Parsing step
+        parser = Parser(tokens)
+        ast = parser.parse() # This might need error handling for parser errors
 
-    ast_output = ""
-    if ast:
-        printer = ASTPrinter()
-        ast_output = printer.print_ast(ast)
+        semantic_output = []
+        ast_str = ""
+        parser_errors = parser.errors # Assuming your Parser class has an 'errors' attribute
 
-    # Semantic Analysis (output is printed, you might want to capture it differently)
-    semantic_output = Semantic.analyze_code(user_code_lines)
+        if ast:
+            analyzer = SemanticAnalyzer()
+            analyzer.analyze(ast)
+            semantic_output = analyzer.errors
+            ast_str = expression_to_str(ast)
 
-    # Count errors
-    total_errors = len(lexer_errors) + len(parser_errors) + len(semantic_output)
+        # Return all analysis results as JSON
+        return jsonify({
+            "tokens": tokens_list,
+            "lexicalErrors": lexical_errors,
+            "parserErrors": parser_errors, # Added parser errors
+            "astString": ast_str,
+            "semanticOutput": semantic_output
+        })
 
-    return jsonify({
-        "tokens": [str(t) for t in tokens],
-        "lexerErrors": lexer_errors,
-        "parserErrors": parser_errors,
-        "ast": ast_output,
-        "semanticOutput": semantic_output,  # Change if Semantic returns structured data
-        "success": total_errors == 0
-    })
+    except Exception as e:
+        # Return error info on failure
+        return jsonify({"error": str(e)}), 500
+
 
 if __name__ == "__main__":
     app.run(debug=True)
